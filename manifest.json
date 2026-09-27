@@ -1,0 +1,10 @@
+{
+  "name": "СКиПП",
+  "short_name": "СКиПП",
+  "description": "Постановка и контроль задач, доски, чат и роли команды",
+  "start_url": "https://claude.ai/artifact/QXVeFobLhixoMo7Fr6TSec",
+  "display": "standalone",
+  "background_color": "#0F151C",
+  "theme_color": "#0F151C",
+  "icons": [{"src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}]
+}
