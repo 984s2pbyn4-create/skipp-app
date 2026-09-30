@@ -61,6 +61,7 @@ a{color:var(--accent)}
 
 /* ---------- каркас ---------- */
 .app{display:flex;min-height:100%}
+@media (min-width:900px){.app{min-height:0}}
 .side{display:none}
 .main-wrap{flex:1;min-width:0;display:flex;flex-direction:column}
 .top{position:sticky;top:env(safe-area-inset-top, 0px);z-index:20;background:var(--bg);display:flex;align-items:center;gap:8px;padding:14px 16px 10px}
@@ -83,8 +84,8 @@ main{padding:4px 16px 120px;max-width:1120px;width:100%}
 .fab[hidden]{display:none}
 
 @media (min-width:900px){
-  .side{display:flex;flex-direction:column;width:236px;flex:none;position:sticky;top:0;height:100vh;padding:20px 12px;border-right:1px solid var(--line);background:var(--surface-2)}
-  .brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px}
+  .side{display:flex;flex-direction:column;width:236px;flex:none;position:sticky;top:env(safe-area-inset-top, 0px);height:calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));height:calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));overflow-y:auto;padding:16px 12px 14px;border-right:1px solid var(--line);background:var(--surface-2)}
+  .brand{display:flex;align-items:center;gap:10px;padding:2px 10px 14px}
   .brand b{font-size:20px;letter-spacing:.02em}
   .brand small{display:block;color:var(--ink-3);font-size:12px;line-height:1.2}
   .mark{width:34px;height:34px;border-radius:9px;background:var(--accent);color:var(--accent-ink);display:grid;place-items:center}
@@ -376,6 +377,12 @@ body.locked .app,body.locked .tabbar,body.locked .fab{visibility:hidden}
 .v-mic.rec{background:var(--red);color:#fff;animation:pulse 1.2s infinite}
 @keyframes pulse{50%{box-shadow:0 0 0 12px color-mix(in srgb, var(--red) 20%, transparent)}}
 @media (prefers-reduced-motion: reduce){.v-mic.rec{animation:none}}
+.mark-img{width:36px;height:36px;border-radius:9px;flex:none;display:block}
+.mark-img.big{width:64px;height:64px;border-radius:15px;margin-bottom:14px}
+#trash-zone{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom, 0px));z-index:99;transform:translate(-50%, 140%);transition:transform .18s ease;display:flex;align-items:center;gap:10px;padding:14px 26px;border-radius:16px;background:var(--surface);color:var(--red);border:2px dashed var(--red);font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.2)}
+#trash-zone.show{transform:translate(-50%, 0)}
+#trash-zone.over{background:var(--red);color:#fff;border-style:solid;transform:translate(-50%, 0) scale(1.08)}
+@media (max-width:520px){.hide-s{display:none}}
 .toast{position:fixed;left:50%;bottom:calc(140px + env(safe-area-inset-bottom, 0px));transform:translateX(-50%);z-index:200;background:var(--ink);color:var(--bg);padding:11px 16px;border-radius:12px;font-size:15px;font-weight:500;max-width:calc(100% - 32px);box-shadow:0 8px 24px rgba(0,0,0,.25);animation:up .2s ease}
 @media (min-width:900px){ .toast{bottom:40px} }
 </style>
@@ -476,7 +483,8 @@ const SECTIONS = [
   {id:'boards',  title:'Доски',       icon:'boards'},
   {id:'subs',    title:'Абоненты',    icon:'phone'},
   {id:'journal', title:'ЖУПиОР',      icon:'book'},
-  {id:'archive', title:'Архив',       icon:'archive'}
+  {id:'archive', title:'Архив',       icon:'archive'},
+  {id:'trash',   title:'Корзина',     icon:'trash'}
 ];
 const TABBAR = ['dash','mine','orders','boards'];
 const secOf = id => SECTIONS.find(s => s.id === id) || SECTIONS[0];
@@ -496,7 +504,7 @@ const KEY = 'skipp_offline_v2';
 const DASH_DEFAULT = ['tiles','od','bn','im','rm','statuses','load'];
 let STORAGE_OK = true;
 function blank(){
-  return {v:2, tasks:[], boards:[], bcards:[], people:[], mcols:[], subs:[], journal:[],
+  return {v:2, tasks:[], boards:[], bcards:[], people:[], mcols:[], subs:[], journal:[], trash:[],
     settings:{theme:'', sign:'', dash:{order:DASH_DEFAULT.slice(), hidden:{}, custom:{}},
       taskStatuses:clone(DEF_TASK_ST), asgStatuses:clone(DEF_ASG_ST), views:{mine:'list', orders:'list'},
       tpl:{order:'official', remind:'official', customOrder:'', customRemind:''}}};
@@ -519,6 +527,8 @@ function load(){
   D.boards.push({id:uid(), title:'Медали', kind:'medals', order:1});
 }
 function migrate(){
+  if (!Array.isArray(D.trash)) D.trash = [];
+  const lim = Date.now() - 30 * 864e5; D.trash = D.trash.filter(x => (x.deletedAt || 0) > lim);
   const b = blank().settings;
   ['taskStatuses','asgStatuses'].forEach(k => { if (!Array.isArray(D.settings[k]) || !D.settings[k].length) D.settings[k] = b[k]; });
   D.settings.views = Object.assign(b.views, D.settings.views || {});
@@ -608,6 +618,25 @@ function setOverall(t, s){
   t.status = s; t.updatedAt = Date.now();
   if (tDone(s)) { if (!t.completedAt) t.completedAt = Date.now(); if (!was) spawnNext(t); }
   else t.completedAt = null;
+}
+/* ---- корзина ---- */
+const TRASH_KIND = {task:'Задача', bcard:'Карточка доски', person:'Наградная доска', sub:'Абонент', j:'Запись ЖУПиОР', board:'Доска'};
+function toTrash(kind, item, extra){
+  D.trash.unshift(Object.assign({id:uid(), kind:kind, item:clone(item), deletedAt:Date.now()}, extra || {}));
+  const arr = {task:'tasks', bcard:'bcards', person:'people', sub:'subs', j:'journal'}[kind];
+  if (arr) D[arr] = D[arr].filter(x => x.id !== item.id);
+}
+function trashLabel(x){ const it = x.item || {}; return it.title || it.fio || it.name || it.brief || (x.board && x.board.title) || 'Без названия'; }
+function restoreTrash(x){
+  const it = x.item;
+  if (x.kind === 'task') { it.archived = false; D.tasks.push(it); }
+  else if (x.kind === 'bcard') { if (!D.boards.some(b => b.id === it.board)) return 'Доска этой карточки удалена — сначала восстановите доску'; D.bcards.push(it); }
+  else if (x.kind === 'person') D.people.push(it);
+  else if (x.kind === 'sub') D.subs.push(it);
+  else if (x.kind === 'j') D.journal.push(it);
+  else if (x.kind === 'board') { D.boards.push(x.board); (x.cards || []).forEach(c => D.bcards.push(c)); if (x.people) { x.people.forEach(p => D.people.push(p)); (x.mcols || []).forEach(c => D.mcols.push(c)); } }
+  D.trash = D.trash.filter(y => y.id !== x.id);
+  return null;
 }
 function autoArchive(){
   const td = today(); let n = 0;
@@ -760,7 +789,7 @@ function bindFoot(sh, o){
   sh.addEventListener('click', async e => {
     const b = e.target.closest('[data-f]'); if (!b) return;
     if (b.dataset.f === 'save') { if (o.onSave() !== false) closeSheet(); }
-    else if (b.dataset.f === 'del') { if (await confirmDlg(o.delText || 'Удалить безвозвратно?')) { o.onDelete(); closeSheet(); } }
+    else if (b.dataset.f === 'del') { if (o.soft || await confirmDlg(o.delText || 'Удалить безвозвратно?')) { o.onDelete(); closeSheet(); if (o.soft) toast('Перемещено в корзину'); } }
   });
 }
 
@@ -768,11 +797,12 @@ function bindFoot(sh, o){
 function countBadge(id){
   if (id === 'mine') { const l = mineTasks().filter(t => !isDone(t)); return {n:l.length, bad:l.some(isOverdue)}; }
   if (id === 'orders') { const l = orderTasks().filter(t => !isDone(t)); return {n:l.length, bad:l.some(isOverdue)}; }
+  if (id === 'trash') return {n:(D.trash || []).length, bad:false};
   return null;
 }
 function sideHtml(){
   const btn = s => { const c = countBadge(s.id); return '<button type="button" data-a="tab" data-tab="'+s.id+'" class="'+(U.tab === s.id ? 'on' : '')+'"'+(U.tab === s.id ? ' aria-current="page"' : '')+'>'+ic(s.icon, 20)+'<span>'+s.title+'</span>'+(c && c.n ? '<span class="cnt'+(c.bad ? ' bad' : '')+'">'+c.n+'</span>' : '')+'</button>'; };
-  return '<div class="brand"><span class="mark">'+ic('check', 20)+'</span><div><b>СКиПП</b><small>личный журнал задач</small></div></div>'
+  return '<div class="brand"><img class="mark-img" src="icon-192.png" alt="" width="36" height="36"><div><b>СКиПП</b><small>личный журнал задач</small></div></div>'
     + '<nav class="nav" aria-label="Разделы">' + SECTIONS.slice(0, 4).map(btn).join('') + '<div class="nav-sep"></div>' + SECTIONS.slice(4).map(btn).join('') + '</nav>'
     + '<div class="grow"></div><nav class="nav"><button type="button" data-a="settings">'+ic('gear', 20)+'<span>Настройки</span></button></nav>';
 }
@@ -809,7 +839,7 @@ function taskCard(t, o){
   o = o || {};
   const cl = t.checklist || [], cd = cl.filter(i => i.done).length;
   const od = isOverdue(t), soon = isSoon(t), st = !!(o.archive), clOpen = !!U.clOpen[t.id];
-  let h = '<article class="card'+(t.priority === 'high' ? ' pr-high' : '')+(isDone(t) ? ' done' : '')+'" data-open="task" data-id="'+t.id+'"'+(o.drag ? ' data-drag="task"' : '')+'>'
+  let h = '<article class="card'+(t.priority === 'high' ? ' pr-high' : '')+(isDone(t) ? ' done' : '')+'" data-open="task" data-id="'+t.id+'"'+(!st ? ' data-drag="task"' : '')+'>'
     + '<div class="t-head"><div class="t-title">'+esc(t.title)+'</div></div>'
     + (t.note ? '<div class="t-note">'+esc(t.note)+'</div>' : '')
     + '<div class="meta-row">'
@@ -1097,7 +1127,15 @@ function viewArchive(){
 }
 
 /* ================= отрисовка ================= */
-const VIEWS = {dash:viewDash, mine:viewMine, orders:viewOrders, cal:viewCal, boards:viewBoards, subs:viewSubs, journal:viewJournal, archive:viewArchive};
+function viewTrash(){
+  const list = D.trash || [];
+  let h = '<div class="bar"><span class="hint" style="margin:0">Удалённое хранится 30 дней, затем стирается само. Карточку можно перетащить сюда из любого списка — появится зона «В корзину».</span><span class="sp"></span>'
+    + (list.length ? '<button type="button" class="btn sm danger-o" data-a="trash-clear">'+ic('trash', 16)+'Очистить корзину</button>' : '') + '</div>';
+  if (!list.length) return h + '<div class="empty"><b>Корзина пуста</b>Удалённые задачи, карточки, абоненты и записи журнала попадают сюда.</div>';
+  return h + '<div class="rows">' + list.map(x => '<div class="row" style="cursor:default"><div class="main"><div class="ttl">'+esc(trashLabel(x))+'</div><div class="sub">'+esc(TRASH_KIND[x.kind] || '')+' · удалено '+esc(fmtDT(x.deletedAt))+'</div></div>'
+    + '<div class="side-r"><button type="button" class="btn sm" data-a="trash-restore" data-id="'+x.id+'">'+ic('restore', 16)+'<span class="hide-s">Восстановить</span></button><button type="button" class="icon-btn" data-a="trash-del" data-id="'+x.id+'" aria-label="Удалить навсегда" title="Удалить навсегда">'+ic('x', 18)+'</button></div></div>').join('') + '</div>';
+}
+const VIEWS = {trash:viewTrash, dash:viewDash, mine:viewMine, orders:viewOrders, cal:viewCal, boards:viewBoards, subs:viewSubs, journal:viewJournal, archive:viewArchive};
 function render(){
   applyTheme();
   const ae = document.activeElement;
@@ -1252,9 +1290,9 @@ function openTaskForm(t, defaults){
     shareText(b.dataset.x === 'order' ? orderText(f) : remindText(f));
     persist(f); closeSheet();
   });
-  bindFoot(sh, {delText:'Удалить задачу безвозвратно?',
+  bindFoot(sh, {soft:true,
     onSave:() => { const f = readForm(); if (!f) return false; const was = !t; persist(f); toast(was ? (f.assignees.length ? 'Указание добавлено' : 'Задача добавлена') : 'Сохранено'); },
-    onDelete:() => commit(() => { D.tasks = D.tasks.filter(x => x.id !== t.id); })});
+    onDelete:() => commit(() => { const x = D.tasks.find(y => y.id === t.id); if (x) toTrash('task', x); })});
   if (isNew && !defaults.noFocus) setTimeout(() => { if (defaults.forOrder) q.focus(); else $('#f-title', sh).focus(); }, 80);
 }
 
@@ -1268,7 +1306,7 @@ function openBCard(id, colId){
     + '<label class="fld"><span class="lbl">Заголовок</span><input type="text" id="k-t" maxlength="200" value="'+esc(c ? c.title : '')+'"></label>'
     + '<label class="fld"><span class="lbl">Заметка</span><textarea id="k-n" rows="4" maxlength="3000">'+esc(c ? c.note : '')+'</textarea></label>'
     + '<label class="fld"><span class="lbl">Столбец</span><select id="k-c">'+optsHtml(cols.map(x => [x.id, x.title]), cur)+'</select></label></div>' + foot({del:!!c}));
-  bindFoot(sh, {delText:'Удалить карточку?', onDelete:() => commit(() => { D.bcards = D.bcards.filter(x => x.id !== c.id); }),
+  bindFoot(sh, {soft:true, onDelete:() => commit(() => { const x = D.bcards.find(y => y.id === c.id); if (x) toTrash('bcard', x); }),
     onSave:() => {
       const title = $('#k-t', sh).value.trim(); if (!title) { $('#k-t', sh).focus(); toast('Введите заголовок'); return false; }
       const col = $('#k-c', sh).value;
@@ -1287,7 +1325,7 @@ function openPerson(id){
     + '<label class="fld"><span class="lbl">К какой награде представляется</span><input type="text" id="p-a" maxlength="200" value="'+esc(p ? p.award : '')+'"></label>'
     + '<label class="fld"><span class="lbl">Имеющиеся награды</span><textarea id="p-e" rows="3" maxlength="1000">'+esc(p ? p.existing : '')+'</textarea></label>'
     + '<label class="fld"><span class="lbl">Столбец</span><select id="p-c">'+optsHtml(cols.map(c => [c.id, c.title]), cur)+'</select></label></div>' + foot({del:!!p}));
-  bindFoot(sh, {delText:'Удалить карточку человека?', onDelete:() => commit(() => { D.people = D.people.filter(x => x.id !== p.id); }),
+  bindFoot(sh, {soft:true, onDelete:() => commit(() => { const x = D.people.find(y => y.id === p.id); if (x) toTrash('person', x); }),
     onSave:() => {
       const fio = $('#p-f', sh).value.trim(); if (!fio) { $('#p-f', sh).focus(); toast('Введите ФИО'); return false; }
       const col = $('#p-c', sh).value, data = {fio:fio, award:$('#p-a', sh).value.trim(), existing:$('#p-e', sh).value.trim(), col:col};
@@ -1358,8 +1396,14 @@ function openBoardSettings(){
       const r = e.target.closest('[data-rm]'); if (r) { cols.splice(Number(r.dataset.rm), 1); draw(); }
     });
   }
-  bindFoot(sh, {delText:'Удалить доску «'+b.title+'» со всеми карточками?',
-    onDelete:() => commit(() => { D.boards = D.boards.filter(x => x.id !== b.id); if (b.kind === 'medals') { if (!D.boards.some(x => x.kind === 'medals')) { D.people = []; D.mcols = []; } } else D.bcards = D.bcards.filter(x => x.board !== b.id); U.board = null; }),
+  bindFoot(sh, {delText:'Переместить доску «'+b.title+'» со всеми карточками в корзину?',
+    onDelete:() => commit(() => {
+      const ex = {board:clone(b), cards:D.bcards.filter(x => x.board === b.id).map(clone)};
+      D.boards = D.boards.filter(x => x.id !== b.id);
+      if (b.kind === 'medals') { if (!D.boards.some(x => x.kind === 'medals')) { ex.people = clone(D.people); ex.mcols = clone(D.mcols); D.people = []; D.mcols = []; } }
+      else D.bcards = D.bcards.filter(x => x.board !== b.id);
+      D.trash.unshift(Object.assign({id:uid(), kind:'board', item:{title:b.title}, deletedAt:Date.now()}, ex));
+      U.board = null; }),
     onSave:() => {
       const title = $('#s-t', sh).value.trim(); if (!title) { toast('Введите название'); return false; }
       commit(() => {
@@ -1379,7 +1423,7 @@ function openSub(id){
     + '<label class="fld"><span class="lbl">Наименование или ФИО</span><input type="text" id="s-n" maxlength="200" value="'+esc(p ? p.name : '')+'"></label>'
     + '<label class="fld"><span class="lbl">Телефон</span><input type="tel" id="s-p" maxlength="60" value="'+esc(p ? p.phone : '')+'"></label>'
     + '<label class="fld"><span class="lbl">Адрес (ЗССПД)</span><input type="text" id="s-a" maxlength="200" value="'+esc(p ? p.address : '')+'"></label></div>' + foot({del:!!p}), {small:true});
-  bindFoot(sh, {delText:'Удалить абонента из справочника?', onDelete:() => commit(() => { D.subs = D.subs.filter(x => x.id !== p.id); }),
+  bindFoot(sh, {soft:true, onDelete:() => commit(() => { const x = D.subs.find(y => y.id === p.id); if (x) toTrash('sub', x); }),
     onSave:() => {
       const name = $('#s-n', sh).value.trim(); if (!name) { $('#s-n', sh).focus(); toast('Введите наименование'); return false; }
       const data = {name:name, phone:$('#s-p', sh).value.trim(), address:$('#s-a', sh).value.trim()};
@@ -1401,7 +1445,7 @@ function openJournalForm(id, pre){
     + '<label class="fld"><span class="lbl">Отметка об исполнении</span><input type="text" id="j-m" maxlength="300" value="'+esc(v.mark || '')+'" placeholder="Необязательно"></label>'
     + '</div>' + foot({del:!!j}));
   $('#j-d', sh).addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; dir = b.dataset.v; $$('#j-d button', sh).forEach(x => x.classList.toggle('on', x === b)); $('#j-pl', sh).textContent = dir === 'in' ? 'От кого' : 'Кому'; });
-  bindFoot(sh, {delText:'Удалить запись из журнала?', onDelete:() => commit(() => { D.journal = D.journal.filter(x => x.id !== j.id); }),
+  bindFoot(sh, {soft:true, onDelete:() => commit(() => { const x = D.journal.find(y => y.id === j.id); if (x) toTrash('j', x); }),
     onSave:() => {
       const brief = $('#j-b', sh).value.trim(); if (!brief) { $('#j-b', sh).focus(); toast('Введите краткое содержание'); return false; }
       const data = {brief:brief, number:$('#j-n', sh).value.trim(), date:$('#j-dt', sh).value || today(), party:$('#j-p', sh).value.trim(), direction:dir, mark:$('#j-m', sh).value.trim()};
@@ -1426,7 +1470,8 @@ function dndTarget(st){
   st.ghost.style.display = 'none';
   const el = document.elementFromPoint(st.x, st.y);
   st.ghost.style.display = '';
-  const col = el && el.closest('[data-drop]');
+  const tz = $('#trash-zone'); st.trash = !!(el && el.closest('#trash-zone')); if (tz) tz.classList.toggle('over', st.trash);
+  const col = st.trash ? null : el && el.closest('[data-drop]');
   $$('.drop-on').forEach(x => x.classList.remove('drop-on'));
   $$('.drop-before').forEach(x => x.classList.remove('drop-before'));
   if (!col || col.dataset.drop !== st.kind) { st.col = null; return; }
@@ -1442,6 +1487,7 @@ function dndBegin(st){
   st.dx = st.x0 - r.left; st.dy = st.y0 - r.top;
   const g = st.el.cloneNode(true); g.classList.add('drag-ghost'); g.style.width = r.width + 'px'; g.style.left = r.left + 'px'; g.style.top = r.top + 'px';
   document.body.appendChild(g); st.ghost = g; st.el.classList.add('dragging');
+  let tz = $('#trash-zone'); if (!tz) { tz = document.createElement('div'); tz.id = 'trash-zone'; tz.innerHTML = ic('trash', 22) + '<span>В корзину</span>'; document.body.appendChild(tz); } tz.classList.remove('over'); requestAnimationFrame(() => tz.classList.add('show'));
   if (navigator.vibrate) { try { navigator.vibrate(12); } catch (e) {} }
   const loop = () => {
     if (!st.active) return;
@@ -1462,6 +1508,12 @@ function dndEnd(drop){
   $$('.drop-on').forEach(x => x.classList.remove('drop-on'));
   $$('.drop-before').forEach(x => x.classList.remove('drop-before'));
   DND.just = true; setTimeout(() => { DND.just = false; }, 350);
+  const tz = $('#trash-zone'); if (tz) tz.classList.remove('show', 'over');
+  if (drop && st.trash) {
+    const arr = {task:'tasks', bcard:'bcards', person:'people'}[st.kind];
+    commit(() => { const x = D[arr].find(y => y.id === st.id); if (x) toTrash(st.kind, x); });
+    toast('Перемещено в корзину'); return;
+  }
   if (!drop || !st.col) return;
   if (st.kind === 'bcard') {
     const b = curBoard(); const list = D.bcards.filter(c => c.board === b.id && c.col === st.col && c.id !== st.id).sort(byOrder);
@@ -1709,7 +1761,7 @@ async function hashPin(pin, salt){
 function pinPad(title, sub, onDone, opts){
   opts = opts || {};
   const ov = document.createElement('div'); ov.className = 'lock-screen';
-  ov.innerHTML = '<div class="lock-box"><span class="mark big">'+ic('check', 28)+'</span><h2>'+esc(title)+'</h2><p class="lock-sub">'+esc(sub)+'</p><div class="pin-dots">'+'<i></i>'.repeat(4)+'</div>'
+  ov.innerHTML = '<div class="lock-box"><img class="mark-img big" src="icon-192.png" alt="" width="64" height="64"><h2>'+esc(title)+'</h2><p class="lock-sub">'+esc(sub)+'</p><div class="pin-dots">'+'<i></i>'.repeat(4)+'</div>'
     + '<div class="pad">'+[1,2,3,4,5,6,7,8,9].map(n => '<button type="button" data-n="'+n+'">'+n+'</button>').join('')
     + (opts.cancel ? '<button type="button" data-c class="pad-t">Отмена</button>' : (opts.forgot ? '<button type="button" data-f class="pad-t">Забыли?</button>' : '<span></span>'))
     + '<button type="button" data-n="0">0</button><button type="button" data-b class="pad-t" aria-label="Стереть">⌫</button></div></div>';
@@ -1854,9 +1906,31 @@ function parseVoice(raw){
   let s = ' ' + String(raw || '').replace(/ё/g, 'е').replace(/Ё/g, 'Е').replace(/\s+/g, ' ') + ' ';
   const B = '(^|[\\s,.;:!?—-])', E = '(?=$|[\\s,.;:!?—-])';
   const take = (re, fn) => { const m = s.match(re); if (!m) return false; s = s.slice(0, m.index) + ' ' + s.slice(m.index + m[0].length); fn(m); return true; };
-  // подробности и пункты — в конце фразы
-  take(new RegExp(B + '(подробност\\S*|примечани\\S*|комментари\\S*)[:,]?\\s+(.+)$', 'i'), m => { r.note = m[3].trim(); });
-  take(new RegExp(B + '(пункты|чек-?лист)[:,]?\\s+(.+)$', 'i'), m => { r.checklist = m[3].split(/[,;]|\sи\s/).map(x => x.trim()).filter(Boolean).map(x => ({id:uid(), text:x, done:false})); });
+  // разделы: «подробности …», «пункты …» / «пункт … пункт …»
+  let src = String(raw || '').replace(/ё/g, 'е').replace(/Ё/g, 'Е').replace(/\s+/g, ' ').trim();
+  src = src.replace(/(^|\s)точка с запятой(?=\s|$)/gi, '; ').replace(/(^|\s)запятая(?=\s|$)/gi, ', ').replace(/(^|\s)точка(?=\s|$)/gi, '. ').replace(/\s+([,.;])/g, '$1');
+  const NOTE_RE = /^(подробност|примечани|комментари|описани|детали)/i;
+  const START_RE = /^(пункты|чек-?лист\S*|список|во-первых)$/i;
+  const ORD_RE = /^(первое|второе|третье|четвертое|пятое|шестое|седьмое|восьмое|девятое|десятое|во-вторых|в-третьих|в-четвертых|в-пятых|далее|следующий|затем|потом)$/i;
+  const NUM_NEXT = /^(\d+|один|два|три|четыре|пять|шесть|семь|восемь|девять|десять|перв\S*|втор\S*|трет\S*|четверт\S*|пят\S*|шест\S*|седьм\S*|восьм\S*|девят\S*|десят\S*)$/i;
+  const W = src ? src.split(' ') : [], head = [], note = [], items = [];
+  let mode = 'head', cur = null;
+  const bareOf = w => (w || '').replace(/^[«"(]+|[,.;:!?»")]+$/g, '').toLowerCase();
+  for (let i = 0; i < W.length; i++) {
+    const w = W[i], bw = bareOf(w), nx = bareOf(W[i + 1]);
+    if (NOTE_RE.test(bw) && mode !== 'note') { mode = 'note'; continue; }
+    if (START_RE.test(bw) || (bw === 'пункт' && mode !== 'items' && NUM_NEXT.test(nx))) {
+      mode = 'items'; cur = []; items.push(cur); if (bw === 'пункт' || (bw === 'пункты' && NUM_NEXT.test(nx))) i++; continue;
+    }
+    if (mode === 'items' && (bw === 'пункт' || ORD_RE.test(bw))) { cur = []; items.push(cur); if (bw === 'пункт' && NUM_NEXT.test(nx)) i++; continue; }
+    if (mode === 'head') head.push(w);
+    else if (mode === 'note') note.push(w);
+    else { cur.push(w); if (/[,;.]$/.test(w)) { cur = []; items.push(cur); } }
+  }
+  const cap = x => x ? x.charAt(0).toUpperCase() + x.slice(1) : x;
+  r.note = cap(note.join(' ').replace(/^[\s,.;:—-]+/, '').trim());
+  r.checklist = items.map(a => a.join(' ').replace(/^[\s,.;:—-]+|[\s,.;:—-]+$/g, '').trim()).filter(Boolean).map(x => ({id:uid(), text:cap(x), done:false}));
+  s = ' ' + head.join(' ') + ' ';
   // напоминание
   take(new RegExp(B + 'напомн\\S*\\s+(в день срока|за\\s+(\\S+)\\s*(дн\\S*|день|сутки|недел\\S*)?)' + E, 'i'), m => {
     if (/день срока/i.test(m[2])) r.remind = 0;
@@ -1903,31 +1977,48 @@ function parseVoice(raw){
   let t = s.replace(new RegExp(B + '(задача|поставить задачу|срок(ом)?)[:,]?' + E, 'gi'), ' ')
     .replace(/\s+/g, ' ').replace(/^[\s,.;:—-]+|[\s,;:—-]+$/g, '').replace(/^(и|до|к|на)\s+/i, '').trim();
   r.title = t ? t.charAt(0).toUpperCase() + t.slice(1) : '';
-  r.found = {asg:r.assignees.length > 0, title:!!r.title, due:!!r.due, pr:r.priority !== 'mid', rep:r.repeat !== 'none', rem:r.remind != null};
+  r.found = {asg:r.assignees.length > 0, title:!!r.title, due:!!r.due, pr:r.priority !== 'mid', rep:r.repeat !== 'none', rem:r.remind != null, note:!!r.note, items:r.checklist.length > 0};
   return r;
 }
 function openVoice(){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  const hints = [['asg','Кому','Иванову и Петрову'],['title','Что сделать','подготовить донесение'],['due','Срок','до пятницы / 5 октября / через 3 дня'],['pr','Приоритет','срочно'],['rep','Повтор','каждый понедельник'],['rem','Напомнить','напомнить за день']];
+  const hints = [['asg','Кому','Иванову и Петрову'],['title','Что сделать','подготовить донесение'],['due','Срок','до пятницы / 5 октября / через 3 дня'],['pr','Приоритет','срочно'],['rep','Повтор','каждый понедельник'],['rem','Напомнить','напомнить за день'],['note','Подробности','«подробности» и текст — в конце'],['items','Пункты','«пункты», затем «первое … второе …» или «пункт … пункт …»']];
   const sh = openSheet(head('Быстрая заметка') + '<div class="sh-b">'
     + '<div class="v-tpl" aria-hidden="true"><div class="v-tpl-h">Назовите по порядку — для полной карточки:</div>'+hints.map(h => '<div class="v-tpl-row" data-h="'+h[0]+'"><b>'+h[1]+'</b><span>'+h[2]+'</span><i class="v-ok">'+ic('check', 14)+'</i></div>').join('')
-    + '<div class="v-tpl-h" style="margin-top:6px">Ещё можно: «подробности …», «пункты …, …»</div></div>'
+    + '<div class="v-tpl-h" style="margin-top:6px">Подробности и пункты называйте последними. Можно говорить «запятая» и «точка».</div></div>'
     + (SR ? '<button type="button" class="v-mic" id="v-mic" aria-label="Начать диктовку">'+ic('mic', 34)+'</button><p class="hint" id="v-st" style="text-align:center;margin:0">Нажмите и говорите</p>' : '<p class="hint" style="margin:0">Распознавание речи в этом браузере недоступно. Нажмите в поле ниже и используйте микрофон на клавиатуре iPhone.</p>')
     + '<textarea id="v-text" rows="4" placeholder="Здесь появится текст. Можно также напечатать или надиктовать с клавиатуры."></textarea>'
     + '</div><div class="sh-f"><span class="sp"></span><button type="button" class="btn" data-close>Отмена</button><button type="button" class="btn primary" id="v-go">Создать карточку</button></div>', {onClose:() => stop()});
   const ta = $('#v-text', sh), btn = $('#v-mic', sh), stEl = $('#v-st', sh);
-  let rec = null, on = false, base = '';
+  let rec = null, on = false, base = '', got = false, restarts = 0;
   const mark = () => { const f = parseVoice(ta.value).found; $$('.v-tpl-row', sh).forEach(r => r.classList.toggle('ok', !!f[r.dataset.h])); };
-  function stop(){ on = false; if (rec) { try { rec.stop(); } catch (e) {} } if (btn) btn.classList.remove('rec'); if (stEl) stEl.textContent = 'Нажмите и говорите'; }
+  const setSt = t => { if (stEl) stEl.textContent = t; };
+  function stop(msg){ on = false; if (rec) { rec.onend = null; try { rec.stop(); } catch (e) {} rec = null; } if (btn) btn.classList.remove('rec'); setSt(msg || 'Нажмите, чтобы продиктовать (можно продолжать — текст допишется)'); }
+  function session(){
+    rec = new SR(); rec.lang = 'ru-RU'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
+    base = ta.value.trim(); base = base ? base + ' ' : '';
+    rec.onresult = ev => {
+      got = true;
+      const parts = []; for (let i = 0; i < ev.results.length; i++) parts.push(String(ev.results[i][0].transcript || '').trim());
+      ta.value = (base + parts.filter(Boolean).join(' ')).replace(/\s+/g, ' ').replace(/\s+([,.;:!?])/g, '$1');
+      mark();
+    };
+    rec.onerror = ev => {
+      if (ev.error === 'no-speech' || ev.error === 'aborted') return;
+      if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') { stop(restarts ? 'Диктовка остановилась — нажмите, чтобы продолжить' : 'Нет доступа к микрофону или распознаванию речи'); if (!restarts) toast('Разрешите микрофон и распознавание речи: Настройки → Safari → Микрофон. Или используйте микрофон на клавиатуре'); return; }
+      if (ev.error === 'network') { stop(); toast('Для распознавания речи нужен интернет. Без сети используйте микрофон на клавиатуре'); return; }
+      stop();
+    };
+    rec.onend = () => {
+      if (!on) return;
+      if (restarts > 40) { stop(); return; }
+      restarts++;
+      setTimeout(() => { if (!on) return; try { session(); rec.start(); } catch (e) { stop('Диктовка остановилась — нажмите, чтобы продолжить'); } }, 120);
+    };
+  }
   function start(){
-    try {
-      rec = new SR(); rec.lang = 'ru-RU'; rec.interimResults = true; rec.continuous = true;
-      base = ta.value ? ta.value.trim() + ' ' : '';
-      rec.onresult = ev => { let fin = '', tmp = ''; for (let i = 0; i < ev.results.length; i++) { const x = ev.results[i][0].transcript; if (ev.results[i].isFinal) fin += x; else tmp += x; } ta.value = (base + fin + tmp).replace(/\s+/g, ' ').trimStart(); mark(); };
-      rec.onerror = ev => { stop(); if (ev.error === 'not-allowed' || ev.error === 'service-not-allowed') toast('Нет доступа к микрофону. Разрешите его в настройках Safari'); else if (ev.error === 'network') toast('Для распознавания речи нужен интернет. Используйте микрофон на клавиатуре'); };
-      rec.onend = () => { if (on) stop(); };
-      rec.start(); on = true; btn.classList.add('rec'); stEl.textContent = 'Слушаю… нажмите ещё раз, чтобы закончить';
-    } catch (e) { stop(); toast('Не удалось включить микрофон'); }
+    try { restarts = 0; got = false; session(); rec.start(); on = true; btn.classList.add('rec'); setSt('Слушаю… нажмите ещё раз, чтобы закончить'); }
+    catch (e) { stop(); toast('Не удалось включить микрофон. Используйте микрофон на клавиатуре'); }
   }
   if (btn) btn.addEventListener('click', () => { if (on) stop(); else start(); });
   ta.addEventListener('input', mark);
@@ -2009,8 +2100,11 @@ async function handle(a, el){
     case 'j-filter': U.jFilter = el.dataset.v; render(); break;
     case 'export-journal': exportJournal(); break;
     case 'restore': commit(() => { const t = D.tasks.find(x => x.id === id); if (!t) return; t.archived = false; t.archivedAt = null; setOverall(t, firstT()); }); toast('Задача возвращена в работу'); break;
-    case 'del-task': if (await confirmDlg('Удалить задачу безвозвратно?')) commit(() => { D.tasks = D.tasks.filter(x => x.id !== id); }); break;
-    case 'clear-archive': if (await confirmDlg('Удалить все задачи из архива?', 'Очистить')) commit(() => { D.tasks = D.tasks.filter(x => !x.archived); }); break;
+    case 'del-task': commit(() => { const x = D.tasks.find(y => y.id === id); if (x) toTrash('task', x); }); toast('Перемещено в корзину'); break;
+    case 'clear-archive': if (await confirmDlg('Переместить все задачи из архива в корзину?', 'Переместить')) commit(() => { D.tasks.filter(x => x.archived).forEach(x => toTrash('task', x)); }); break;
+    case 'trash-restore': { let err = null; commit(() => { const x = D.trash.find(y => y.id === id); if (x) err = restoreTrash(x); }); toast(err || 'Восстановлено'); break; }
+    case 'trash-del': if (await confirmDlg('Удалить навсегда? Восстановить будет нельзя.')) commit(() => { D.trash = D.trash.filter(y => y.id !== id); }); break;
+    case 'trash-clear': if (await confirmDlg('Очистить корзину? Всё в ней будет удалено навсегда.', 'Очистить')) { commit(() => { D.trash = []; }); toast('Корзина очищена'); } break;
   }
 }
 document.addEventListener('click', e => {
