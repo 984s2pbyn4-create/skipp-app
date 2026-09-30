@@ -1,27 +1,52 @@
-// СКиПП: офлайн-кэш. При изменении файлов увеличьте номер версии.
-const CACHE = 'skipp-v3';
-const CORE = ['./', 'index.html', 'manifest.json', 'icon-180.png', 'icon-192.png', 'icon-512.png'];
+const V = 'skat-2.4';
+const APP = 'skat-app-' + V, LIB = 'skat-lib', TILES = 'skat-tiles';
+const SHELL = ['./', './index.html'];
+const LIBS = ['https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
+'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
+'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js'];
+const TILE_HOSTS = ['maps.yandex.net', 'opentopomap.org', 'arcgisonline.com', 'tile.openstreetmap.org', 'elevation-tiles-prod'];
+const MAX_TILES = 80000;
 self.addEventListener('install', e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(CORE)).then(() => self.skipWaiting()));
+e.waitUntil((async () => {
+const a = await caches.open(APP); await Promise.all(SHELL.map(u => a.add(u).catch(() => {})));
+const l = await caches.open(LIB); await Promise.all(LIBS.map(u => l.match(u).then(m => m || l.add(u)).catch(() => {})));
+self.skipWaiting();
+})());
 });
 self.addEventListener('activate', e => {
-  e.waitUntil(caches.keys().then(keys => Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))).then(() => self.clients.claim()));
+e.waitUntil((async () => {
+const old = (await caches.keys()).filter(k => k.startsWith('skat-app-') && k !== APP);
+if (old.length){ const n = await caches.open(APP); if (!(await n.match('./index.html'))) for (const k of old){ const m = await (await caches.open(k)).match('./index.html'); if (m){ await n.put('./index.html', m); break; } } }
+for (const k of old) await caches.delete(k);
+await self.clients.claim();
+})());
 });
+let puts = 0;
+async function trim(){
+const c = await caches.open(TILES), keys = await c.keys();
+if (keys.length > MAX_TILES) for (const k of keys.slice(0, keys.length - MAX_TILES + 1000)) await c.delete(k);
+}
+async function cacheFirst(req, name){
+const c = await caches.open(name), hit = await c.match(req);
+if (hit && !(req.mode === 'cors' && hit.type === 'opaque')) return hit;
+try {
+const res = await fetch(req);
+if (res && (res.ok || res.type === 'opaque')){ c.put(req, res.clone()).catch(() => {}); if (name === TILES && ++puts % 500 === 0) trim(); }
+return res;
+} catch(err){ return hit || Response.error(); }
+}
+async function appFirst(req, e){
+const c = await caches.open(APP);
+const hit = (await c.match('./index.html')) || (await c.match('./'));
+const upd = fetch(req, {cache:'no-cache'}).then(res => { if (res && res.ok) return c.put('./index.html', res.clone()).then(() => res); return res; });
+if (hit){ e.waitUntil(upd.catch(() => {})); return hit; }
+try { return await upd; } catch(err){ return Response.error(); }
+}
 self.addEventListener('fetch', e => {
-  const req = e.request;
-  if (req.method !== 'GET') return;
-  const url = new URL(req.url);
-  // Страница: сначала сеть (чтобы получать обновления), без сети — из кэша
-  if (req.mode === 'navigate') {
-    e.respondWith(fetch(req).then(r => { const c = r.clone(); caches.open(CACHE).then(x => x.put('index.html', c)); return r; })
-      .catch(() => caches.match('index.html').then(r => r || caches.match('./'))));
-    return;
-  }
-  // Остальное (шрифты, иконки, библиотека Excel): из кэша, иначе из сети с сохранением
-  e.respondWith(caches.match(req).then(hit => hit || fetch(req).then(r => {
-    if (r && (r.ok || r.type === 'opaque') && (url.origin === location.origin || /fonts\.(googleapis|gstatic)\.com|cdnjs\.cloudflare\.com/.test(url.host))) {
-      const c = r.clone(); caches.open(CACHE).then(x => x.put(req, c));
-    }
-    return r;
-  })));
+const req = e.request;
+if (req.method !== 'GET') return;
+const u = new URL(req.url);
+if (req.mode === 'navigate') { e.respondWith(appFirst(req, e)); return; }
+if (TILE_HOSTS.some(h => u.hostname.includes(h) || u.pathname.includes(h))) { e.respondWith(cacheFirst(req, TILES)); return; }
+if (u.hostname === 'cdnjs.cloudflare.com' || u.hostname.includes('fonts.g')) { e.respondWith(cacheFirst(req, LIB)); return; }
 });
