@@ -1,10 +1,23 @@
 {
-  "name": "СКиПП",
-  "short_name": "СКиПП",
-  "description": "Постановка и контроль задач, доски, чат и роли команды",
-  "start_url": "https://claude.ai/artifact/QXVeFobLhixoMo7Fr6TSec",
-  "display": "standalone",
-  "background_color": "#0F151C",
-  "theme_color": "#0F151C",
-  "icons": [{"src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}]
+ "name": "СКиПП — личный журнал задач",
+ "short_name": "СКиПП",
+ "start_url": "./",
+ "scope": "./",
+ "display": "standalone",
+ "background_color": "#ECEEE8",
+ "theme_color": "#2F5D46",
+ "lang": "ru",
+ "icons": [
+  {
+   "src": "icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png"
+  },
+  {
+   "src": "icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "any maskable"
+  }
+ ]
 }
