@@ -118,7 +118,7 @@ main{padding:4px 16px 120px;max-width:1120px;width:100%}
 .search{position:relative;flex:1;min-width:200px}
 .search .ic{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--ink-3)}
 .search input[type=search]{padding-left:38px}
-input[type=text],input[type=search],input[type=tel],input[type=date],input[type=number],input[type=datetime-local],select,textarea{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line-2);border-radius:11px;background:var(--surface);font-size:16px}
+input[type=text],input[type=password],input[type=search],input[type=tel],input[type=date],input[type=number],input[type=datetime-local],select,textarea{width:100%;min-height:44px;padding:10px 12px;border:1px solid var(--line-2);border-radius:11px;background:var(--surface);font-size:16px}
 textarea{resize:vertical;line-height:1.4}
 select{appearance:none;-webkit-appearance:none;padding-right:34px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%237A847E' stroke-width='1.8' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
 input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
@@ -360,7 +360,7 @@ body.lock{overflow:hidden}
 .pad button{width:76px;height:76px;border-radius:50%;border:0;background:var(--surface);box-shadow:var(--shadow);font-size:28px;font-weight:500}
 .pad button:active{background:var(--sunk)}
 .pad .pad-t{background:none;box-shadow:none;font-size:15px;color:var(--ink-2)}
-body.locked .app,body.locked .tabbar,body.locked .fab{visibility:hidden}
+body.locked .app,body.locked .tabbar,body.locked .fab,body.privacy .app,body.privacy .tabbar,body.privacy .fab,body.privacy .ov{visibility:hidden}
 .fab-v{right:auto;left:18px;width:54px;padding:0;justify-content:center;background:var(--surface);color:var(--accent);border:1px solid var(--line-2)}
 @media (min-width:900px){.fab-v{left:auto;right:180px}}
 [data-lp]{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
@@ -379,8 +379,8 @@ body.locked .app,body.locked .tabbar,body.locked .fab{visibility:hidden}
 @media (prefers-reduced-motion: reduce){.v-mic.rec{animation:none}}
 .mark-img{width:36px;height:36px;border-radius:9px;flex:none;display:block}
 .mark-img.big{width:64px;height:64px;border-radius:15px;margin-bottom:14px}
-#trash-zone{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom, 0px));z-index:99;transform:translate(-50%, 140%);transition:transform .18s ease;display:flex;align-items:center;gap:10px;padding:14px 26px;border-radius:16px;background:var(--surface);color:var(--red);border:2px dashed var(--red);font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.2)}
-#trash-zone.show{transform:translate(-50%, 0)}
+#trash-zone{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom, 0px));z-index:99;transform:translate(-50%, calc(100% + 60px + env(safe-area-inset-bottom, 0px)));visibility:hidden;opacity:0;transition:transform .18s ease, opacity .18s ease, visibility 0s linear .18s;display:flex;align-items:center;gap:10px;padding:14px 26px;border-radius:16px;background:var(--surface);color:var(--red);border:2px dashed var(--red);font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.2)}
+#trash-zone.show{transform:translate(-50%, 0);visibility:visible;opacity:1;transition:transform .18s ease, opacity .18s ease}
 #trash-zone.over{background:var(--red);color:#fff;border-style:solid;transform:translate(-50%, 0) scale(1.08)}
 @media (max-width:520px){.hide-s{display:none}}
 .toast{position:fixed;left:50%;bottom:calc(140px + env(safe-area-inset-bottom, 0px));transform:translateX(-50%);z-index:200;background:var(--ink);color:var(--bg);padding:11px 16px;border-radius:12px;font-size:15px;font-weight:500;max-width:calc(100% - 32px);box-shadow:0 8px 24px rgba(0,0,0,.25);animation:up .2s ease}
@@ -517,16 +517,44 @@ function applyLoaded(d){
   D.settings.dash = Object.assign(blank().settings.dash, (d.settings || {}).dash || {});
   migrate();
 }
+/* ---- шифрование (AES-GCM, ключ из кода-пароля через PBKDF2) ---- */
+const CRYPTO_OK = !!(window.crypto && crypto.subtle && window.isSecureContext !== false);
+const ITER = 310000;
+const SEC = {key:null, locked:false, q:Promise.resolve(), hiddenAt:0};
+const b64e = u8 => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
+const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+async function deriveKey(secret, salt, iter){
+  const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(secret), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey({name:'PBKDF2', salt:salt, iterations:iter || ITER, hash:'SHA-256'}, base, {name:'AES-GCM', length:256}, false, ['encrypt', 'decrypt']);
+}
+async function encStr(key, str){
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({name:'AES-GCM', iv:iv}, key, new TextEncoder().encode(str)));
+  return {iv:b64e(iv), ct:b64e(ct)};
+}
+async function decStr(key, env){ return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM', iv:b64d(env.iv)}, key, b64d(env.ct))); }
+function pinRec(){ try { return JSON.parse(localStorage.getItem('skipp_pin') || 'null'); } catch (e) { return null; } }
+function pinRecV2(){ const r = pinRec(); return r && r.v === 2 ? r : null; }
 function load(){
   try { const t = '__t'; localStorage.setItem(t, '1'); localStorage.removeItem(t); } catch (e) { STORAGE_OK = false; }
   let raw = null;
   try { raw = localStorage.getItem(KEY); } catch (e) { raw = null; }
-  if (raw) { try { applyLoaded(JSON.parse(raw)); return; } catch (e) { console.error(e); } }
+  if (raw) {
+    let obj = null; try { obj = JSON.parse(raw); } catch (e) { console.error(e); }
+    if (obj && obj.enc === 1) { D = blank(); D.savedAt = 0; SEC.locked = true; return; }
+    if (obj) { try { applyLoaded(obj); return; } catch (e) { console.error(e); } }
+  }
   D = blank();
   D.savedAt = 0;
-  D.boards.push({id:uid(), title:'Медали', kind:'medals', order:1});
 }
 function migrate(){
+  if ((D.boards || []).some(b => b.kind === 'medals')) {
+    if (!Array.isArray(D.trash)) D.trash = [];
+    D.boards.filter(b => b.kind === 'medals').forEach(b => {
+      if ((D.people || []).length) D.trash.unshift({id:uid(), kind:'board', item:{title:b.title}, deletedAt:Date.now(), board:clone(b), cards:[], people:clone(D.people), mcols:clone(D.mcols || [])});
+    });
+    D.boards = D.boards.filter(b => b.kind !== 'medals'); D.people = []; D.mcols = [];
+  }
   if (!Array.isArray(D.trash)) D.trash = [];
   const lim = Date.now() - 30 * 864e5; D.trash = D.trash.filter(x => (x.deletedAt || 0) > lim);
   const b = blank().settings;
@@ -541,8 +569,16 @@ function migrate(){
   D.tasks.forEach(t => { if (!tt.has(t.status)) t.status = firstT(); (t.assignees || []).forEach(a => { if (!ta.has(a.status)) a.status = firstA(); }); });
 }
 function saveLocal(){
-  if (!STORAGE_OK) return false;
-  try { localStorage.setItem(KEY, JSON.stringify(D)); return true; }
+  if (!STORAGE_OK || SEC.locked) return false;
+  const str = JSON.stringify(D);
+  if (SEC.key) {
+    const key = SEC.key;
+    SEC.q = SEC.q.then(() => encStr(key, str)).then(env => { localStorage.setItem(KEY, JSON.stringify({enc:1, iv:env.iv, ct:env.ct})); })
+      .catch(() => toast('Не удалось сохранить зашифрованные данные'));
+    return true;
+  }
+  if (pinRecV2()) return false;
+  try { localStorage.setItem(KEY, str); return true; }
   catch (e) { toast('Не удалось сохранить на устройстве: память заполнена'); return false; }
 }
 function save(){ D.savedAt = Date.now(); return saveLocal(); }
@@ -1046,7 +1082,7 @@ function medalCols(){ return FIXED_MCOLS.concat(D.mcols.slice().sort(byOrder).ma
 function curBoard(){ const l = D.boards.slice().sort(byOrder); return l.find(b => b.id === U.board) || l[0] || null; }
 function viewBoards(){
   const list = D.boards.slice().sort(byOrder);
-  if (!list.length) return '<div class="empty"><b>Досок нет</b>Доска — столбцы с карточками: идеи, учёт, наградные списки.<br><button type="button" class="btn primary" data-a="add-board">'+ic('plus', 18)+'Создать доску</button></div>';
+  if (!list.length) return '<div class="empty"><b>Досок нет</b>Доска — столбцы с карточками: идеи, учёт, планы.<br><button type="button" class="btn primary" data-a="add-board">'+ic('plus', 18)+'Создать доску</button></div>';
   const b = curBoard(); U.board = b.id;
   let h = '<div class="bchips">' + list.map(x => '<button type="button" class="fchip'+(x.id === b.id ? ' on' : '')+'" data-a="pick-board" data-id="'+x.id+'">'+(x.kind === 'medals' ? ic('medal', 16) : '')+esc(x.title)+'</button>').join('')
     + '<button type="button" class="fchip" data-a="add-board">'+ic('plus', 16)+'Доска</button></div>';
@@ -1362,9 +1398,8 @@ function openNewBoard(){
   let kind = 'generic';
   const sh = openSheet(head('Новая доска') + '<div class="sh-b">'
     + '<label class="fld"><span class="lbl">Название</span><input type="text" id="b-t" maxlength="100" placeholder="Например, Учёт техники"></label>'
-    + '<div class="fld"><span class="lbl">Тип</span><div class="seg" id="b-k"><button type="button" data-v="generic" class="on">Обычная</button><button type="button" data-v="medals">Наградная (по месяцам)</button></div></div>'
     + '<p class="hint" style="margin:0">Столбцы обычной доски меняются в её настройках.</p></div>' + foot({save:'Создать'}), {small:true});
-  $('#b-k', sh).addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; kind = b.dataset.v; $$('#b-k button', sh).forEach(x => x.classList.toggle('on', x === b)); });
+  const bk = $('#b-k', sh); if (bk) bk.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; kind = b.dataset.v; $$('#b-k button', sh).forEach(x => x.classList.toggle('on', x === b)); });
   bindFoot(sh, {onSave:() => {
     const title = $('#b-t', sh).value.trim(); if (!title) { $('#b-t', sh).focus(); toast('Введите название'); return false; }
     const id = uid();
@@ -1508,7 +1543,7 @@ function dndEnd(drop){
   $$('.drop-on').forEach(x => x.classList.remove('drop-on'));
   $$('.drop-before').forEach(x => x.classList.remove('drop-before'));
   DND.just = true; setTimeout(() => { DND.just = false; }, 350);
-  const tz = $('#trash-zone'); if (tz) tz.classList.remove('show', 'over');
+  const tz = $('#trash-zone'); if (tz) { tz.classList.remove('show', 'over'); setTimeout(() => { if (!DND.st && tz.parentNode) tz.remove(); }, 260); }
   if (drop && st.trash) {
     const arr = {task:'tasks', bcard:'bcards', person:'people'}[st.kind];
     commit(() => { const x = D[arr].find(y => y.id === st.id); if (x) toTrash(st.kind, x); });
@@ -1552,7 +1587,19 @@ document.addEventListener('touchmove', e => { if (DND.st && DND.st.active) e.pre
 document.addEventListener('contextmenu', e => { if (DND.st) e.preventDefault(); });
 
 /* ================= экспорт и резервная копия ================= */
+/* ---- Android (Capacitor): встроенные модули ---- */
+const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const NP = name => (NATIVE && window.Capacitor.Plugins && window.Capacitor.Plugins[name]) || null;
+const blobToB64 = b => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(b); });
 async function saveFile(name, data){
+  const FS = NP('Filesystem'), SH = NP('Share');
+  if (FS && SH) {
+    try {
+      const w = await FS.writeFile({path:name, data:await blobToB64(data), directory:'CACHE'});
+      await SH.share({title:name, url:w.uri, dialogTitle:'Сохранить или отправить файл'});
+      return true;
+    } catch (e) { if (/cancel/i.test(String(e && (e.message || e)))) return false; toast('Не удалось сохранить файл'); return false; }
+  }
   try {
     const file = new File([data], name, {type:data.type || 'application/octet-stream'});
     if (navigator.canShare && navigator.canShare({files:[file]})) { await navigator.share({files:[file], title:name}); return true; }
@@ -1591,15 +1638,65 @@ function exportBoard(){
     exportXlsx('doska', b.title.slice(0, 30), ['ФИО','Столбец','Награда','Имеющиеся награды'], D.people.slice().sort(byOrder).map(p => [p.fio, (cols.find(c => c.id === (ids.has(p.col) ? p.col : 'c_staff')) || {}).title || '', p.award || '', p.existing || '']), [34,18,30,34]);
   } else exportXlsx('doska', b.title.slice(0, 30), ['Заголовок','Столбец','Заметка'], D.bcards.filter(c => c.board === b.id).sort(byOrder).map(c => [c.title, ((b.cols || []).find(x => x.id === c.col) || {}).title || '', c.note || '']), [36,18,50]);
 }
-function backup(){ saveFile('skipp_dannye_' + today() + '.json', new Blob([JSON.stringify(D, null, 1)], {type:'application/json'})); }
+function backup(){
+  const sh = openSheet(head('Выгрузить данные') + '<div class="sh-b">'
+    + '<p class="hint" style="margin:0">Задайте пароль на файл — без него данные из файла не прочитать. Пароль понадобится при загрузке на другом устройстве, восстановить его нельзя.</p>'
+    + '<label class="fld"><span class="lbl">Пароль на файл</span><input type="password" id="bk-p1" autocomplete="new-password" placeholder="Не короче 4 символов"></label>'
+    + '<label class="fld"><span class="lbl">Повторите пароль</span><input type="password" id="bk-p2" autocomplete="new-password"></label>'
+    + '<div id="bk-ready" hidden class="banner" style="margin:0">Файл зашифрован и готов. Нажмите «Сохранить / отправить».</div>'
+    + '</div><div class="sh-f"><button type="button" class="btn ghost" id="bk-plain">Без пароля</button><span class="sp"></span><button type="button" class="btn primary" id="bk-go">Зашифровать</button></div>', {small:true});
+  let blob = null;
+  const name = 'skipp_dannye_' + today() + '.json';
+  $('#bk-plain', sh).addEventListener('click', async () => {
+    if (!(await confirmDlg('Файл без пароля может прочитать любой, к кому он попадёт. Выгрузить без пароля?', 'Выгрузить'))) return;
+    closeSheet(); saveFile(name, new Blob([JSON.stringify(D, null, 1)], {type:'application/json'}));
+  });
+  $('#bk-go', sh).addEventListener('click', async e => {
+    if (blob) { closeSheet(); saveFile(name, blob); return; }
+    const p1 = $('#bk-p1', sh).value, p2 = $('#bk-p2', sh).value;
+    if (p1.length < 4) { toast('Пароль — не короче 4 символов'); $('#bk-p1', sh).focus(); return; }
+    if (p1 !== p2) { toast('Пароли не совпадают'); $('#bk-p2', sh).focus(); return; }
+    if (!CRYPTO_OK) { toast('Шифрование недоступно в этом браузере'); return; }
+    const btn = e.currentTarget; btn.disabled = true; btn.textContent = 'Шифрую…';
+    try {
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const key = await deriveKey(p1, salt, ITER);
+      const env = await encStr(key, JSON.stringify(D));
+      blob = new Blob([JSON.stringify({skipp:'enc1', salt:b64e(salt), iter:ITER, iv:env.iv, ct:env.ct})], {type:'application/json'});
+      $('#bk-ready', sh).hidden = false; btn.disabled = false; btn.textContent = 'Сохранить / отправить';
+      $('#bk-p1', sh).value = ''; $('#bk-p2', sh).value = '';
+    } catch (err) { btn.disabled = false; btn.textContent = 'Зашифровать'; toast('Не удалось зашифровать файл'); }
+  });
+  setTimeout(() => $('#bk-p1', sh).focus(), 80);
+}
+function askFilePassword(env, done){
+  const sh = openSheet(head('Пароль файла') + '<div class="sh-b"><p class="hint" style="margin:0">Файл защищён паролем. Введите пароль, заданный при выгрузке.</p>'
+    + '<label class="fld"><span class="lbl">Пароль</span><input type="password" id="fp-p" autocomplete="current-password"></label></div>'
+    + '<div class="sh-f"><span class="sp"></span><button type="button" class="btn" data-close>Отмена</button><button type="button" class="btn primary" id="fp-go">Открыть</button></div>', {small:true});
+  const go = async () => {
+    const btn = $('#fp-go', sh); btn.disabled = true; btn.textContent = 'Проверяю…';
+    try {
+      const key = await deriveKey($('#fp-p', sh).value, b64d(env.salt), env.iter || ITER);
+      const d = JSON.parse(await decStr(key, env));
+      closeSheet(); done(d);
+    } catch (e) { btn.disabled = false; btn.textContent = 'Открыть'; toast('Неверный пароль'); $('#fp-p', sh).select(); }
+  };
+  $('#fp-go', sh).addEventListener('click', go);
+  $('#fp-p', sh).addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  setTimeout(() => $('#fp-p', sh).focus(), 80);
+}
 function restoreFrom(file){
   const r = new FileReader();
-  r.onload = async () => {
+  r.onload = () => {
     let d; try { d = JSON.parse(r.result); } catch (e) { toast('Файл не читается: это не файл данных СКиПП'); return; }
-    if (!d || !Array.isArray(d.tasks)) { toast('В файле нет данных СКиПП'); return; }
-    if (!(await confirmDlg('Заменить все данные на этом устройстве данными из файла? Задач в файле: ' + d.tasks.length + '.', 'Загрузить'))) return;
-    commit(() => { const b = blank(); D = Object.assign(b, d); D.settings = Object.assign(b.settings, d.settings || {}); D.settings.dash = Object.assign(blank().settings.dash, (d.settings || {}).dash || {}); });
-    toast('Данные загружены');
+    const apply = async d => {
+      if (!d || !Array.isArray(d.tasks)) { toast('В файле нет данных СКиПП'); return; }
+      if (!(await confirmDlg('Заменить все данные на этом устройстве данными из файла? Задач в файле: ' + d.tasks.length + '.', 'Загрузить'))) return;
+      commit(() => { applyLoaded(d); });
+      toast('Данные загружены');
+    };
+    if (d && d.skipp === 'enc1') { if (!CRYPTO_OK) { toast('Шифрование недоступно в этом браузере'); return; } askFilePassword(d, apply); }
+    else apply(d);
   };
   r.readAsText(file);
 }
@@ -1617,13 +1714,16 @@ function openSettings(){
     + '<div class="set-sec"><h3>Данные</h3><p>Всё хранится только на этом устройстве и никуда не отправляется. Чтобы перенести задачи на другое устройство, выгрузите файл, передайте его любым способом (Telegram, почта, AirDrop) и загрузите там.</p>'
     + '<div class="btn-row"><button type="button" class="btn sm" data-s="backup">'+ic('download', 16)+'Выгрузить данные</button><label class="btn sm" style="cursor:pointer">'+ic('upload', 16)+'Загрузить данные<input type="file" id="st-file" accept=".json,application/json" hidden></label><button type="button" class="btn sm" data-s="xlsx">'+ic('download', 16)+'Задачи в Excel</button></div>'
     + '<p class="hint" style="margin:0">Загрузка заменяет все данные на устройстве данными из файла.</p></div>'
-    + '<div class="set-sec"><h3>Код-пароль</h3><p>'+(pinSet() ? 'Включён: при запуске запрашивается код из 4 цифр.' : 'Выключен. Можно задать код из 4 цифр, который будет запрашиваться при запуске.')+'</p><div class="btn-row">'
+    + '<div class="set-sec"><h3>Код-пароль и защита</h3><p>'+(pinSet() ? (pinRecV2() ? 'Включён. Данные на устройстве зашифрованы этим кодом.' : 'Включён.') : 'Выключен. Задайте код из 4 цифр — он будет запрашиваться при запуске, а данные на устройстве будут зашифрованы.')+'</p>'
+    + (pinSet() ? '<div class="set-line"><span>Автоблокировка</span><div class="seg" id="st-al">'+[[0,'Сразу'],[1,'1 мин'],[5,'5 мин'],[15,'15 мин'],[-1,'Выкл']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+(autolockMin() === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div></div><p class="hint" style="margin:0">Если приложение свёрнуто дольше этого времени, при возврате снова нужен код. Пока свёрнуто, содержимое скрыто.</p>' : '')
+    + '<div class="btn-row">'
     +   (pinSet() ? '<button type="button" class="btn sm" data-s="pin-set">Сменить код</button><button type="button" class="btn sm danger-o" data-s="pin-off">Выключить</button>' : '<button type="button" class="btn sm" data-s="pin-set">Включить код-пароль</button>')
     + '</div></div>'
     + '<div class="set-sec"><h3>Очистка</h3><div class="btn-row"><button type="button" class="btn sm danger-o" data-s="wipe">'+ic('trash', 16)+'Удалить все данные</button></div></div>'
     + '</div><div class="sh-f"><span class="sp"></span><button type="button" class="btn primary" data-close>Готово</button></div>');
   $('#st-th', sh).addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; D.settings.theme = b.dataset.v; save(); applyTheme(); $$('#st-th button', sh).forEach(x => x.classList.toggle('on', x === b)); });
   $('#st-sign', sh).addEventListener('input', e => { D.settings.sign = e.target.value; save(); });
+  const al = $('#st-al', sh); if (al) al.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; D.settings.autolock = Number(b.dataset.v); save(); $$('button', al).forEach(x => x.classList.toggle('on', x === b)); });
   $$('[data-view]', sh).forEach(g => g.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; D.settings.views[g.dataset.view] = b.dataset.v; save(); render(); $$('button', g).forEach(x => x.classList.toggle('on', x === b)); }));
   $('#st-file', sh).addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) { closeSheet(); restoreFrom(f); } });
   sh.addEventListener('click', async e => {
@@ -1635,11 +1735,11 @@ function openSettings(){
     else if (k === 'st-asg') openStatusEditor('asg');
     else if (k === 'backup') backup();
     else if (k === 'pin-set') { closeSheet(); setupPin(); }
-    else if (k === 'pin-off') { if (await confirmDlg('Выключить код-пароль при запуске?', 'Выключить')) { try { localStorage.removeItem(PIN_KEY); } catch (err) {} closeSheet(); toast('Код-пароль выключен'); } }
+    else if (k === 'pin-off') { if (await confirmDlg('Выключить код-пароль? Данные на устройстве будут храниться без шифрования.', 'Выключить')) { await disablePin(); closeSheet(); toast('Код-пароль выключен'); } }
     else if (k === 'xlsx') exportTasks();
     else if (k === 'wipe') {
       if (await confirmDlg('Удалить все задачи, доски, абонентов и журнал с этого устройства? Действие можно отменить кнопкой «Отменить» до закрытия страницы.', 'Удалить всё')) {
-        closeSheet(); commit(() => { const s = D.settings; D = blank(); D.settings = s; D.boards.push({id:uid(), title:'Медали', kind:'medals', order:1}); }); toast('Данные удалены');
+        closeSheet(); commit(() => { const s = D.settings; D = blank(); D.settings = s; }); toast('Данные удалены');
       }
     }
   });
@@ -1772,7 +1872,8 @@ function pinPad(title, sub, onDone, opts){
   const api = {
     close(){ ov.remove(); if (!SHEETS.length) document.body.classList.remove('lock'); },
     fail(msg){ v = ''; draw(); subEl.textContent = msg; ov.querySelector('.pin-dots').classList.remove('shake'); void ov.offsetWidth; ov.querySelector('.pin-dots').classList.add('shake'); },
-    reset(t, s){ v = ''; draw(); $('h2', ov).textContent = t; subEl.textContent = s; }
+    reset(t, s){ v = ''; draw(); $('h2', ov).textContent = t; subEl.textContent = s; },
+    msg(s){ subEl.textContent = s; }
   };
   const press = n => { if (v.length >= 4) return; v += n; draw(); if (v.length === 4) { const x = v; setTimeout(() => onDone(x, api), 120); } };
   ov.addEventListener('click', e => {
@@ -1786,25 +1887,58 @@ function pinPad(title, sub, onDone, opts){
   document.addEventListener('keydown', kd);
   return api;
 }
+function autolockMin(){ const v = D.settings.autolock; return v == null ? 5 : Number(v); }
+async function enablePin(pin){
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const key = await deriveKey(pin, salt, ITER);
+  const chk = await encStr(key, 'skipp');
+  localStorage.setItem(PIN_KEY, JSON.stringify({v:2, salt:b64e(salt), iter:ITER, chk:chk}));
+  SEC.key = key; SEC.locked = false;
+  saveLocal(); await SEC.q;
+}
+async function disablePin(){
+  await SEC.q;
+  SEC.key = null;
+  try { localStorage.removeItem(PIN_KEY); localStorage.removeItem('skipp_pin_fail'); localStorage.setItem(KEY, JSON.stringify(D)); } catch (e) {}
+}
+async function unlockWith(pin, rec){
+  let key;
+  try { key = await deriveKey(pin, b64d(rec.salt), rec.iter || ITER); await decStr(key, rec.chk); } catch (e) { return false; }
+  let obj = null; try { obj = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
+  if (obj && obj.enc === 1) { try { applyLoaded(JSON.parse(await decStr(key, obj))); } catch (e) { toast('Данные повреждены и не расшифровываются'); return false; } }
+  else if (obj) applyLoaded(obj);
+  SEC.key = key; SEC.locked = false;
+  HIST.undo.length = 0; HIST.redo.length = 0;
+  if (obj && obj.enc !== 1) saveLocal();
+  return true;
+}
 function setupPin(){
   let first = null;
   pinPad('Новый код-пароль', 'Введите 4 цифры', async (x, api) => {
     if (first == null) { first = x; api.reset('Повторите код', 'Введите те же 4 цифры ещё раз'); return; }
     if (x !== first) { first = null; api.reset('Новый код-пароль', 'Коды не совпали. Введите 4 цифры заново'); return; }
-    const salt = uid();
-    try { localStorage.setItem(PIN_KEY, JSON.stringify({salt:salt, h:await hashPin(x, salt)})); localStorage.removeItem('skipp_pin_fail'); api.close(); toast('Код-пароль включён'); }
-    catch (e) { api.close(); toast('Не удалось сохранить код'); }
+    api.msg('Шифрую данные…');
+    try {
+      if (CRYPTO_OK) await enablePin(x);
+      else { const salt = uid(); localStorage.setItem(PIN_KEY, JSON.stringify({salt:salt, h:await hashPin(x, salt)})); }
+      localStorage.removeItem('skipp_pin_fail'); api.close(); toast(CRYPTO_OK ? 'Код-пароль включён, данные зашифрованы' : 'Код-пароль включён (шифрование недоступно в этом браузере)');
+    } catch (e) { api.close(); toast('Не удалось включить код-пароль'); }
   }, {cancel:true});
 }
 function askPin(then){
-  let rec = null; try { rec = JSON.parse(localStorage.getItem(PIN_KEY) || 'null'); } catch (e) {}
+  const rec = pinRec();
   if (!rec) { then(); return; }
+  if ($('.lock-screen')) return;
   const FK = 'skipp_pin_fail', MAX = 10;
   const getF = () => { try { return Number(localStorage.getItem(FK)) || 0; } catch (e) { return 0; } };
   const setF = n => { try { localStorage.setItem(FK, String(n)); } catch (e) {} };
   const f0 = getF();
   pinPad('СКиПП', f0 >= 6 ? 'Введите код-пароль. Осталось попыток: ' + (MAX - f0) : 'Введите код-пароль', async (x, api) => {
-    if (await hashPin(x, rec.salt) === rec.h) { setF(0); api.close(); then(); return; }
+    api.msg('Проверяю…');
+    let ok = false;
+    if (rec.v === 2) ok = await unlockWith(x, rec);
+    else { ok = (await hashPin(x, rec.salt)) === rec.h; if (ok && CRYPTO_OK) { try { await enablePin(x); } catch (e) {} } }
+    if (ok) { setF(0); api.close(); then(); return; }
     const n = getF() + 1; setF(n);
     if (n >= MAX) {
       try { localStorage.removeItem(KEY); localStorage.removeItem(PIN_KEY); localStorage.removeItem(FK); localStorage.removeItem(UKEY); sessionStorage.setItem('skipp_wiped', '1'); } catch (e) {}
@@ -1818,6 +1952,16 @@ function askPin(then){
     else askPin(then);
   }});
 }
+async function lockNow(){
+  if (!pinSet() || $('.lock-screen')) return;
+  await SEC.q;
+  while (SHEETS.length) closeSheet();
+  if (pinRecV2()) { SEC.key = null; SEC.locked = true; D = blank(); HIST.undo.length = 0; HIST.redo.length = 0; }
+  document.body.classList.add('locked');
+  render();
+  askPin(afterUnlock);
+}
+function afterUnlock(){ document.body.classList.remove('locked'); autoArchive(); render(); }
 
 /* ================= офлайн-генератор Excel (.xlsx) ================= */
 const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
@@ -1867,6 +2011,8 @@ function buildXlsx(sheetName, rows, widths){
 
 /* ================= поделиться долгим нажатием ================= */
 function shareText(text){
+  const SH = NP('Share');
+  if (SH) { SH.share({text:text, dialogTitle:'Отправить задачу'}).catch(e => { if (!/cancel/i.test(String(e && (e.message || e)))) copyText(text, 'Не удалось открыть «Поделиться» — текст скопирован'); }); return; }
   if (navigator.share) {
     navigator.share({text:text}).catch(e => { if (!(e && e.name === 'AbortError')) copyText(text, 'Не удалось открыть «Поделиться» — текст скопирован'); });
   } else copyText(text, '«Поделиться» недоступно — текст скопирован');
@@ -1982,18 +2128,19 @@ function parseVoice(raw){
 }
 function openVoice(){
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const NSR = NP('SpeechRecognition');
   const hints = [['asg','Кому','Иванову и Петрову'],['title','Что сделать','подготовить донесение'],['due','Срок','до пятницы / 5 октября / через 3 дня'],['pr','Приоритет','срочно'],['rep','Повтор','каждый понедельник'],['rem','Напомнить','напомнить за день'],['note','Подробности','«подробности» и текст — в конце'],['items','Пункты','«пункты», затем «первое … второе …» или «пункт … пункт …»']];
   const sh = openSheet(head('Быстрая заметка') + '<div class="sh-b">'
     + '<div class="v-tpl" aria-hidden="true"><div class="v-tpl-h">Назовите по порядку — для полной карточки:</div>'+hints.map(h => '<div class="v-tpl-row" data-h="'+h[0]+'"><b>'+h[1]+'</b><span>'+h[2]+'</span><i class="v-ok">'+ic('check', 14)+'</i></div>').join('')
     + '<div class="v-tpl-h" style="margin-top:6px">Подробности и пункты называйте последними. Можно говорить «запятая» и «точка».</div></div>'
-    + (SR ? '<button type="button" class="v-mic" id="v-mic" aria-label="Начать диктовку">'+ic('mic', 34)+'</button><p class="hint" id="v-st" style="text-align:center;margin:0">Нажмите и говорите</p>' : '<p class="hint" style="margin:0">Распознавание речи в этом браузере недоступно. Нажмите в поле ниже и используйте микрофон на клавиатуре iPhone.</p>')
+    + ((SR || NSR) ? '<button type="button" class="v-mic" id="v-mic" aria-label="Начать диктовку">'+ic('mic', 34)+'</button><p class="hint" id="v-st" style="text-align:center;margin:0">Нажмите и говорите</p>' : '<p class="hint" style="margin:0">Распознавание речи в этом браузере недоступно. Нажмите в поле ниже и используйте микрофон на клавиатуре iPhone.</p>')
     + '<textarea id="v-text" rows="4" placeholder="Здесь появится текст. Можно также напечатать или надиктовать с клавиатуры."></textarea>'
-    + '</div><div class="sh-f"><span class="sp"></span><button type="button" class="btn" data-close>Отмена</button><button type="button" class="btn primary" id="v-go">Создать карточку</button></div>', {onClose:() => stop()});
+    + '</div><div class="sh-f"><span class="sp"></span><button type="button" class="btn" data-close>Отмена</button><button type="button" class="btn primary" id="v-go">Создать карточку</button></div>', {onClose:() => { stop(); if (NSR && nl) { try { NSR.removeAllListeners(); } catch (e) {} } }});
   const ta = $('#v-text', sh), btn = $('#v-mic', sh), stEl = $('#v-st', sh);
   let rec = null, on = false, base = '', got = false, restarts = 0;
   const mark = () => { const f = parseVoice(ta.value).found; $$('.v-tpl-row', sh).forEach(r => r.classList.toggle('ok', !!f[r.dataset.h])); };
   const setSt = t => { if (stEl) stEl.textContent = t; };
-  function stop(msg){ on = false; if (rec) { rec.onend = null; try { rec.stop(); } catch (e) {} rec = null; } if (btn) btn.classList.remove('rec'); setSt(msg || 'Нажмите, чтобы продиктовать (можно продолжать — текст допишется)'); }
+  function stop(msg){ if (NSR && on) { try { NSR.stop(); } catch (e) {} } on = false; if (rec) { rec.onend = null; try { rec.stop(); } catch (e) {} rec = null; } if (btn) btn.classList.remove('rec'); setSt(msg || 'Нажмите, чтобы продиктовать (можно продолжать — текст допишется)'); }
   function session(){
     rec = new SR(); rec.lang = 'ru-RU'; rec.interimResults = true; rec.continuous = false; rec.maxAlternatives = 1;
     base = ta.value.trim(); base = base ? base + ' ' : '';
@@ -2016,7 +2163,37 @@ function openVoice(){
       setTimeout(() => { if (!on) return; try { session(); rec.start(); } catch (e) { stop('Диктовка остановилась — нажмите, чтобы продолжить'); } }, 120);
     };
   }
+  let nl = false;
+  async function nativeStart(){
+    try {
+      const av = await NSR.available(); if (!av || !av.available) throw new Error('na');
+      let pm = await NSR.checkPermissions(); if (pm.speechRecognition !== 'granted') pm = await NSR.requestPermissions();
+      if (pm.speechRecognition !== 'granted') { stop(); toast('Разрешите приложению доступ к микрофону'); return; }
+      base = ta.value.trim(); base = base ? base + ' ' : '';
+      if (!nl) {
+        nl = true;
+        await NSR.addListener('partialResults', d => { const m = ((d && d.matches) || [])[0] || ''; if (!on) return; ta.value = (base + m).replace(/\s+/g, ' ').replace(/\s+([,.;:!?])/g, '$1'); mark(); });
+        await NSR.addListener('listeningState', d => {
+          if (!d || d.status !== 'stopped' || !on) return;
+          if (restarts > 40) { stop(); return; }
+          restarts++; base = ta.value.trim(); base = base ? base + ' ' : '';
+          setTimeout(() => { if (on) NSR.start({language:'ru-RU', maxResults:1, partialResults:true, popup:false}).catch(() => stop('Диктовка остановилась — нажмите, чтобы продолжить')); }, 200);
+        });
+      }
+      restarts = 0; on = true; btn.classList.add('rec'); setSt('Слушаю… нажмите ещё раз, чтобы закончить');
+      await NSR.start({language:'ru-RU', maxResults:1, partialResults:true, popup:false});
+    } catch (e) {
+      if (!on && String(e && e.message) !== 'na') return;
+      stop();
+      try {
+        const r = await NSR.start({language:'ru-RU', maxResults:1, partialResults:false, popup:true});
+        const m = ((r && r.matches) || [])[0];
+        if (m) { ta.value = ((ta.value.trim() ? ta.value.trim() + ' ' : '') + m).replace(/\s+/g, ' '); mark(); }
+      } catch (e2) { toast('Распознавание речи недоступно. Используйте микрофон на клавиатуре'); }
+    }
+  }
   function start(){
+    if (NSR) { nativeStart(); return; }
     try { restarts = 0; got = false; session(); rec.start(); on = true; btn.classList.add('rec'); setSt('Слушаю… нажмите ещё раз, чтобы закончить'); }
     catch (e) { stop(); toast('Не удалось включить микрофон. Используйте микрофон на клавиатуре'); }
   }
@@ -2124,14 +2301,24 @@ document.addEventListener('change', e => { if (e.target.dataset && e.target.data
 document.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target.id === 'quick') { e.preventDefault(); quickAdd(); } });
 $('#fab-v').addEventListener('click', openVoice);
 $('#fab').addEventListener('click', () => { if (U.tab === 'orders') openTaskForm(null, {forOrder:true}); else if (U.tab === 'cal') openTaskForm(null, {task:{due:U.sel}}); else openTaskForm(null); });
-document.addEventListener('visibilitychange', () => { if (!document.hidden) { autoArchive(); render(); } });
-window.addEventListener('storage', e => { if (e.key === KEY && e.newValue) { try { D = JSON.parse(e.newValue); render(); } catch (err) {} } });
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    SEC.hiddenAt = Date.now();
+    if (pinSet() && !SEC.locked) { document.body.classList.add('privacy'); if (autolockMin() === 0) lockNow(); }
+    return;
+  }
+  const al = autolockMin();
+  if (pinSet() && !SEC.locked && al > 0 && SEC.hiddenAt && Date.now() - SEC.hiddenAt >= al * 60000) lockNow();
+  document.body.classList.remove('privacy');
+  if (!SEC.locked && !$('.lock-screen')) { autoArchive(); render(); }
+});
+window.addEventListener('storage', e => { if (e.key === KEY && e.newValue && !SEC.key && !SEC.locked) { try { const o = JSON.parse(e.newValue); if (o && !o.enc) { D = o; render(); } } catch (err) {} } });
 
 /* ================= запуск ================= */
 load();
 autoArchive();
 try { if (sessionStorage.getItem('skipp_wiped')) { sessionStorage.removeItem('skipp_wiped'); setTimeout(() => toast('10 неверных попыток: данные удалены'), 400); } } catch (e) {}
-if (pinSet()) { document.body.classList.add('locked'); askPin(() => { document.body.classList.remove('locked'); render(); }); }
+if (pinSet()) { document.body.classList.add('locked'); askPin(afterUnlock); }
 render();
 if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (e) {} }
 if ('serviceWorker' in navigator && location.protocol === 'https:') { window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); }); }
