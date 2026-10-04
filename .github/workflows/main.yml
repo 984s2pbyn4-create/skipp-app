@@ -1,0 +1,74 @@
+name: Сборка APK
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Получить файлы
+        uses: actions/checkout@v4
+
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - name: Подготовить веб-файлы
+        run: |
+          mkdir -p www
+          cp index.html manifest.json icon-180.png icon-192.png icon-512.png www/
+
+      - name: Установить Capacitor и модули
+        run: |
+          npm init -y > /dev/null
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/filesystem@6 @capacitor/share@6 @capacitor-community/speech-recognition@6
+          cat > capacitor.config.json <<'JSON'
+          { "appId": "ru.skipp.app", "appName": "СКиПП", "webDir": "www" }
+          JSON
+          npx cap add android
+          npx cap sync android
+
+      - name: Разрешения (микрофон, распознавание речи)
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          grep -q RECORD_AUDIO $M || sed -i 's#</manifest>#    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n</manifest>#' $M
+          grep -q RecognitionService $M || sed -i 's#</manifest>#    <queries><intent><action android:name="android.speech.RecognitionService" /></intent></queries>\n</manifest>#' $M
+
+      - name: Иконка приложения
+        run: |
+          pip install --quiet pillow
+          python3 - <<'PY'
+          from PIL import Image
+          import os, shutil
+          R = 'android/app/src/main/res'
+          shutil.rmtree(R + '/mipmap-anydpi-v26', ignore_errors=True)
+          src = Image.open('icon-512.png').convert('RGBA')
+          for n, s in [('mdpi', 48), ('hdpi', 72), ('xhdpi', 96), ('xxhdpi', 144), ('xxxhdpi', 192)]:
+              for f in ('ic_launcher.png', 'ic_launcher_round.png'):
+                  src.resize((s, s), Image.LANCZOS).save(os.path.join(R, 'mipmap-' + n, f))
+          PY
+
+      - name: Собрать и подписать APK
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease
+          BT=$(ls -d $ANDROID_HOME/build-tools/* | sort -V | tail -1)
+          $BT/zipalign -f -p 4 app/build/outputs/apk/release/app-release-unsigned.apk ../skipp-aligned.apk
+          $BT/apksigner sign --ks ../skipp-release.keystore --ks-key-alias skipp --ks-pass pass:skipp-store-2026 --key-pass pass:skipp-store-2026 --out ../SKiPP.apk ../skipp-aligned.apk
+
+      - name: Выложить APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: SKiPP-apk
+          path: SKiPP.apk
