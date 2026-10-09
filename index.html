@@ -414,6 +414,8 @@ body.locked .app,body.locked .tabbar,body.locked .fab,body.privacy .app,body.pri
 .tour-dots i{width:7px;height:7px;border-radius:50%;background:var(--line-2)}
 .tour-dots i.on{background:var(--accent);width:20px;border-radius:4px}
 .tour-nav{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.al-opt{flex-direction:column;align-items:flex-start;text-align:left;white-space:normal;padding:12px 14px;gap:4px;min-height:0;width:100%}
+.al-opt span{font-weight:400;font-size:14px;color:var(--ink-2)}
 .toast{position:fixed;left:50%;bottom:calc(140px + env(safe-area-inset-bottom, 0px));transform:translateX(-50%);z-index:200;background:var(--ink);color:var(--bg);padding:11px 16px;border-radius:12px;font-size:15px;font-weight:500;max-width:calc(100% - 32px);box-shadow:0 8px 24px rgba(0,0,0,.25);animation:up .2s ease}
 @media (min-width:900px){ .toast{bottom:40px} }
 </style>
@@ -551,7 +553,7 @@ function applyLoaded(d){
 /* ---- шифрование (AES-GCM, ключ из кода-пароля через PBKDF2) ---- */
 const CRYPTO_OK = !!(window.crypto && crypto.subtle && window.isSecureContext !== false);
 const ITER = 310000;
-const SEC = {key:null, locked:false, q:Promise.resolve(), hiddenAt:0};
+const SEC = {key:null, locked:false, decoy:false, q:Promise.resolve(), hiddenAt:0};
 const b64e = u8 => { let s = ''; for (let i = 0; i < u8.length; i += 0x8000) s += String.fromCharCode.apply(null, u8.subarray(i, i + 0x8000)); return btoa(s); };
 const b64d = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
 async function deriveKey(secret, salt, iter){
@@ -604,7 +606,7 @@ function saveLocal(){
   const str = JSON.stringify(D);
   if (SEC.key) {
     const key = SEC.key;
-    SEC.q = SEC.q.then(() => encStr(key, str)).then(env => { localStorage.setItem(KEY, JSON.stringify({enc:1, iv:env.iv, ct:env.ct})); })
+    SEC.q = SEC.q.then(() => encStr(key, str)).then(env => { localStorage.setItem(SEC.decoy ? 'skipp_dx' : KEY, JSON.stringify({enc:1, iv:env.iv, ct:env.ct})); })
       .catch(() => toast('Не удалось сохранить зашифрованные данные'));
     return true;
   }
@@ -1681,6 +1683,7 @@ function exportBoard(){
   } else exportXlsx('doska', b.title.slice(0, 30), ['Заголовок','Столбец','Заметка','Примечание'], D.bcards.filter(c => c.board === b.id).sort(byOrder).map(c => [c.title, ((b.cols || []).find(x => x.id === c.col) || {}).title || '', c.note || '', c.remark || '']), [36,18,44,36]);
 }
 function backup(){
+  if (SEC.decoy) return;
   const sh = openSheet(head('Выгрузить данные') + '<div class="sh-b">'
     + '<p class="hint" style="margin:0">Задайте пароль на файл — без него данные из файла не прочитать. Пароль понадобится при загрузке на другом устройстве, восстановить его нельзя.</p>'
     + '<label class="fld"><span class="lbl">Пароль на файл</span><input type="password" id="bk-p1" autocomplete="new-password" placeholder="Не короче 4 символов"></label>'
@@ -1691,10 +1694,10 @@ function backup(){
   const name = 'skipp_dannye_' + today() + '.json';
   $('#bk-plain', sh).addEventListener('click', async () => {
     if (!(await confirmDlg('Файл без пароля может прочитать любой, к кому он попадёт. Выгрузить без пароля?', 'Выгрузить'))) return;
-    closeSheet(); saveFile(name, new Blob([JSON.stringify(D, null, 1)], {type:'application/json'}));
+    D.settings.lastBackup = Date.now(); save(); closeSheet(); saveFile(name, new Blob([JSON.stringify(D, null, 1)], {type:'application/json'}));
   });
   $('#bk-go', sh).addEventListener('click', async e => {
-    if (blob) { closeSheet(); saveFile(name, blob); return; }
+    if (blob) { D.settings.lastBackup = Date.now(); save(); closeSheet(); saveFile(name, blob); return; }
     const p1 = $('#bk-p1', sh).value, p2 = $('#bk-p2', sh).value;
     if (p1.length < 4) { toast('Пароль — не короче 4 символов'); $('#bk-p1', sh).focus(); return; }
     if (p1 !== p2) { toast('Пароли не совпадают'); $('#bk-p2', sh).focus(); return; }
@@ -1758,13 +1761,14 @@ function openSettings(){
     +   '<label class="switch"><input type="checkbox" id="st-splash"'+(D.settings.splash !== false ? ' checked' : '')+'><span>Заставка с фактами при запуске</span></label></div>'
     + '<div class="set-sec"><h3>Обучение</h3><p>Короткий обзор возможностей и тестовые задачи, чтобы всё попробовать.</p><div class="btn-row"><button type="button" class="btn sm" data-s="tour">Обучение</button>'
     +   (hasDemo() ? '<button type="button" class="btn sm danger-o" data-s="demo-off">Убрать образец</button>' : '<button type="button" class="btn sm" data-s="demo">Образец</button>') + '</div></div>'
+    + (SEC.decoy ? '' : ''
     + '<div class="set-sec"><h3>Данные</h3><p>Всё хранится только на этом устройстве и никуда не отправляется. Чтобы перенести задачи на другое устройство, выгрузите файл, передайте его любым способом (Telegram, почта, AirDrop) и загрузите там.</p>'
     + '<div class="btn-row"><button type="button" class="btn sm" data-s="backup">'+ic('download', 16)+'Выгрузить данные</button><label class="btn sm" style="cursor:pointer">'+ic('upload', 16)+'Загрузить данные<input type="file" id="st-file" accept=".json,application/json" hidden></label><button type="button" class="btn sm" data-s="xlsx">'+ic('download', 16)+'Задачи в Excel</button></div>'
-    + '<p class="hint" style="margin:0">Загрузка заменяет все данные на устройстве данными из файла.</p></div>'
+    + '<p class="hint" style="margin:0">Загрузка заменяет все данные на устройстве данными из файла.</p></div>')
     + '<div class="set-sec"><h3>Код-пароль и защита</h3><p>'+(pinSet() ? (pinRecV2() ? 'Включён. Данные на устройстве зашифрованы этим кодом.' : 'Включён.') : 'Выключен. Задайте код из 4 цифр — он будет запрашиваться при запуске, а данные на устройстве будут зашифрованы.')+'</p>'
     + (pinSet() ? '<div class="set-line"><span>Автоблокировка</span><div class="seg" id="st-al">'+[[0,'Сразу'],[1,'1 мин'],[5,'5 мин'],[15,'15 мин'],[-1,'Выкл']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+(autolockMin() === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div></div><p class="hint" style="margin:0">Если приложение свёрнуто дольше этого времени, при возврате снова нужен код. Пока свёрнуто, содержимое скрыто.</p>' : '')
     + '<div class="btn-row">'
-    +   (pinSet() ? '<button type="button" class="btn sm" data-s="pin-set">Сменить код</button><button type="button" class="btn sm danger-o" data-s="pin-off">Выключить</button>' : '<button type="button" class="btn sm" data-s="pin-set">Включить код-пароль</button>')
+    +   (SEC.decoy ? '' : pinSet() ? '<button type="button" class="btn sm" data-s="pin-set">Сменить код</button><button type="button" class="btn sm danger-o" data-s="alarm">Тревога'+(auxRec() ? ' (вкл.)' : '')+'</button><button type="button" class="btn sm danger-o" data-s="pin-off">Выключить</button>' : '<button type="button" class="btn sm" data-s="pin-set">Включить код-пароль</button>')
     + '</div></div>'
     + '<div class="set-sec"><h3>Очистка</h3><div class="btn-row"><button type="button" class="btn sm danger-o" data-s="wipe">'+ic('trash', 16)+'Удалить все данные</button></div></div>'
     + '</div><div class="sh-f"><span class="sp"></span><button type="button" class="btn primary" data-close>Готово</button></div>');
@@ -1774,12 +1778,13 @@ function openSettings(){
   $('#st-code', sh).addEventListener('change', e => { D.settings.embedCode = e.target.checked; save(); });
   const al = $('#st-al', sh); if (al) al.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; D.settings.autolock = Number(b.dataset.v); save(); $$('button', al).forEach(x => x.classList.toggle('on', x === b)); });
   $$('[data-view]', sh).forEach(g => g.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; D.settings.views[g.dataset.view] = b.dataset.v; save(); render(); $$('button', g).forEach(x => x.classList.toggle('on', x === b)); }));
-  $('#st-file', sh).addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) { closeSheet(); restoreFrom(f); } });
+  const stf = $('#st-file', sh); if (stf) stf.addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) { closeSheet(); restoreFrom(f); } });
   sh.addEventListener('click', async e => {
     const b = e.target.closest('[data-s]'); if (!b) return;
     const k = b.dataset.s;
     if (k === 'dash') { closeSheet(); openDashSettings(); }
     else if (k === 'tpl') openTemplates();
+    else if (k === 'alarm') { closeSheet(); openAlarm(); }
     else if (k === 'tour') { closeSheet(); openTour(); }
     else if (k === 'demo') { closeSheet(); addDemo(); }
     else if (k === 'demo-off') { closeSheet(); removeDemo(); }
@@ -1951,11 +1956,14 @@ async function enablePin(pin){
 async function disablePin(){
   await SEC.q;
   SEC.key = null;
-  try { localStorage.removeItem(PIN_KEY); localStorage.removeItem('skipp_pin_fail'); localStorage.setItem(KEY, JSON.stringify(D)); } catch (e) {}
+  try { ['skipp_aux', 'skipp_dx'].forEach(k => localStorage.removeItem(k)); localStorage.removeItem(PIN_KEY); localStorage.removeItem('skipp_pin_fail'); localStorage.setItem(KEY, JSON.stringify(D)); } catch (e) {}
 }
 async function unlockWith(pin, rec){
-  let key;
-  try { key = await deriveKey(pin, b64d(rec.salt), rec.iter || ITER); await decStr(key, rec.chk); } catch (e) { return false; }
+  const key = await tryKey(pin, rec); if (!key) return false;
+  return openWithKey(key);
+}
+async function openWithKey(key){
+  SEC.decoy = false;
   let obj = null; try { obj = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
   if (obj && obj.enc === 1) { try { applyLoaded(JSON.parse(await decStr(key, obj))); } catch (e) { toast('Данные повреждены и не расшифровываются'); return false; } }
   else if (obj) applyLoaded(obj);
@@ -1988,7 +1996,12 @@ function askPin(then){
   pinPad('СКиПП', f0 >= 6 ? 'Введите код-пароль. Осталось попыток: ' + (MAX - f0) : 'Введите код-пароль', async (x, api) => {
     api.msg('Проверяю…');
     let ok = false;
-    if (rec.v === 2) ok = await unlockWith(x, rec);
+    if (rec.v === 2) {
+      const aux = auxRec();
+      const ks = await Promise.all([tryKey(x, rec), aux ? tryKey(x, aux) : tryKey(x, rec).then(() => null)]);
+      if (ks[0]) ok = await openWithKey(ks[0]);
+      else if (ks[1]) { setF(0); api.close(); await enterDuress(ks[1], aux); return; }
+    }
     else { ok = (await hashPin(x, rec.salt)) === rec.h; if (ok && CRYPTO_OK) { try { await enablePin(x); } catch (e) {} } }
     if (ok) { setF(0); api.close(); then(); return; }
     const n = getF() + 1; setF(n);
@@ -2008,7 +2021,7 @@ async function lockNow(){
   if (!pinSet() || $('.lock-screen')) return;
   await SEC.q;
   while (SHEETS.length) closeSheet();
-  if (pinRecV2()) { SEC.key = null; SEC.locked = true; D = blank(); HIST.undo.length = 0; HIST.redo.length = 0; }
+  if (pinRecV2()) { SEC.key = null; SEC.locked = true; SEC.decoy = false; D = blank(); HIST.undo.length = 0; HIST.redo.length = 0; }
   document.body.classList.add('locked');
   render();
   askPin(afterUnlock);
@@ -2403,7 +2416,7 @@ function removeDemo(){
 let INTRO_DONE = false;
 function startIntro(){
   if (INTRO_DONE) return; INTRO_DONE = true;
-  const tour = () => { let seen = false; try { seen = !!localStorage.getItem('skipp_tour'); } catch (e) {} if (!seen) openTour(); };
+  const tour = () => { let seen = false; try { seen = !!localStorage.getItem('skipp_tour'); } catch (e) {} if (!seen) openTour(); else setTimeout(backupReminder, 300); };
   if (D.settings.splash !== false) showSplash(tour); else tour();
 }
 
@@ -2480,6 +2493,81 @@ function openPasteTask(){
     toast(p.exact ? 'Задача перенесена — проверьте и сохраните' : 'Проверьте карточку и сохраните');
   });
   setTimeout(() => ta.focus(), 100);
+}
+
+/* ================= тревога (тревожный код) ================= */
+const AUX_KEY = 'skipp_aux', DECOY_KEY = 'skipp_dx';
+function auxRec(){ try { const r = JSON.parse(localStorage.getItem(AUX_KEY) || 'null'); return r && r.v === 2 ? r : null; } catch (e) { return null; } }
+async function tryKey(pin, rec){ try { const k = await deriveKey(pin, b64d(rec.salt), rec.iter || ITER); await decStr(k, rec.chk); return k; } catch (e) { return null; } }
+async function enterDuress(key, aux){
+  HIST.undo.length = 0; HIST.redo.length = 0; INTRO_DONE = true;
+  if (aux.mode === 'wipe') {
+    try {
+      [KEY, DECOY_KEY, AUX_KEY, 'skipp_facts', UKEY, 'skipp_pin_fail'].forEach(k => localStorage.removeItem(k));
+      localStorage.setItem(PIN_KEY, JSON.stringify({v:2, salt:aux.salt, iter:aux.iter || ITER, chk:aux.chk}));
+    } catch (e) {}
+    D = blank(); D.settings.splash = false; SEC.decoy = false; SEC.key = key; SEC.locked = false;
+    saveLocal(); await SEC.q;
+  } else {
+    SEC.decoy = true; SEC.key = key; SEC.locked = false;
+    let obj = null; try { obj = JSON.parse(localStorage.getItem(DECOY_KEY) || 'null'); } catch (e) {}
+    D = blank();
+    if (obj && obj.enc === 1) { try { applyLoaded(JSON.parse(await decStr(key, obj))); } catch (e) { D = blank(); } }
+  }
+  U.tab = 'dash'; document.body.classList.remove('locked'); render();
+}
+function openAlarm(){
+  const aux = auxRec();
+  const sh = openSheet(head('Тревога') + '<div class="sh-b">'
+    + '<p style="margin:0">Тревожный код — второй код из 4 цифр. Его вводят вместо обычного, если приложение требуют открыть под давлением. Экран ввода и время проверки одинаковые для обоих кодов.</p>'
+    + (aux ? '<div class="banner" style="margin:0">Тревога включена. Режим: <b>'+(aux.mode === 'wipe' ? 'обнулить приложение' : 'чистый вход')+'</b>.</div>' : '')
+    + '<div class="fld"><span class="lbl">Что делать при вводе тревожного кода</span>'
+    + '<button type="button" class="btn al-opt" data-m="clean"><b>Чистый вход</b><span>Приложение откроется пустым — без заставки, обучения и задач. Ваши данные останутся зашифрованными: с обычным кодом всё будет на месте.</span></button>'
+    + '<button type="button" class="btn al-opt danger-o" data-m="wipe"><b>Обнулить приложение</b><span>Все данные на устройстве будут безвозвратно удалены. Приложение откроется пустым, тревожный код станет обычным.</span></button></div>'
+    + '<p class="hint" style="margin:0">Затем нужно придумать тревожный код — он должен отличаться от обычного.</p>'
+    + '</div><div class="sh-f">'+(aux ? '<button type="button" class="btn danger-o" data-off>Выключить тревогу</button>' : '')+'<span class="sp"></span><button type="button" class="btn" data-close>Закрыть</button></div>');
+  sh.addEventListener('click', async e => {
+    const b = e.target.closest('[data-m]');
+    if (b) { const mode = b.dataset.m; closeSheet(); setupDuress(mode); return; }
+    if (e.target.closest('[data-off]')) {
+      if (await confirmDlg('Выключить тревожный код? Данные режима «Чистый вход» будут удалены.', 'Выключить')) { try { localStorage.removeItem(AUX_KEY); localStorage.removeItem(DECOY_KEY); } catch (err) {} closeSheet(); toast('Тревога выключена'); }
+    }
+  });
+}
+function setupDuress(mode){
+  const main = pinRecV2(); if (!main || !CRYPTO_OK) { toast('Сначала включите обычный код-пароль'); return; }
+  let first = null;
+  pinPad('Тревожный код', 'Придумайте 4 цифры — не такие, как обычный код', async (x, api) => {
+    if (first == null) { first = x; api.reset('Повторите тревожный код', 'Введите те же 4 цифры ещё раз'); return; }
+    if (x !== first) { first = null; api.reset('Тревожный код', 'Коды не совпали. Введите 4 цифры заново'); return; }
+    api.msg('Проверяю…');
+    if (await tryKey(x, main)) { first = null; api.reset('Тревожный код', 'Этот код совпадает с обычным. Придумайте другой'); return; }
+    try {
+      const salt = crypto.getRandomValues(new Uint8Array(16));
+      const key = await deriveKey(x, salt, ITER);
+      const chk = await encStr(key, 'skipp');
+      localStorage.setItem(AUX_KEY, JSON.stringify({v:2, salt:b64e(salt), iter:ITER, chk:chk, mode:mode}));
+      localStorage.removeItem(DECOY_KEY);
+      api.close(); toast('Тревожный код установлен: ' + (mode === 'wipe' ? 'обнуление' : 'чистый вход'));
+    } catch (e) { api.close(); toast('Не удалось сохранить тревожный код'); }
+  }, {cancel:true});
+}
+
+/* ================= напоминание о резервной копии ================= */
+function backupReminder(){
+  if (SEC.decoy) return;
+  const s = D.settings, now = Date.now();
+  if (!s.firstUse) { s.firstUse = now; save(); return; }
+  if (!D.tasks.length) return;
+  const last = s.lastBackup || s.firstUse;
+  if (now - last < 7 * 864e5 || now < (s.backupSnooze || 0)) return;
+  const days = Math.floor((now - last) / 864e5);
+  const sh = openSheet(head('Пора сделать резервную копию') + '<div class="sh-b"><p style="margin:0">'
+    + (s.lastBackup ? 'С последней выгрузки данных прошло ' + days + ' ' + plural(days, 'день', 'дня', 'дней') + '.' : 'Вы ещё ни разу не выгружали данные.')
+    + ' Если телефон потеряется или браузер очистит память, задачи можно будет восстановить только из файла.</p></div>'
+    + '<div class="sh-f"><button type="button" class="btn ghost" data-later>Напомнить завтра</button><span class="sp"></span><button type="button" class="btn primary" data-now>'+ic('download', 18)+'Выгрузить сейчас</button></div>', {small:true});
+  $('[data-later]', sh).addEventListener('click', () => { s.backupSnooze = Date.now() + 864e5; save(); closeSheet(); });
+  $('[data-now]', sh).addEventListener('click', () => { closeSheet(); backup(); });
 }
 
 /* ================= действия ================= */
