@@ -772,10 +772,11 @@ function tplVars(t, names){
     '{пункты}':cl.map(i => '— ' + i.text.trim()).join('\n'), '{срок}':dueText(t), '{осталось}':leftText(t),
     '{приоритет}':t.priority === 'high' ? 'Приоритет: высокий' : '', '{подпись}':(D.settings.sign || '').trim(), '{дата}':fmtFull(today())};
 }
-function orderText(t){ return fillTpl(tplText('order'), tplVars(t, (t.assignees || []).map(a => a.name))); }
+function withCode(s, t){ return D.settings.embedCode && typeof taskCode === 'function' ? s + '\n\n' + taskCode(t) : s; }
+function orderText(t){ return withCode(fillTpl(tplText('order'), tplVars(t, (t.assignees || []).map(a => a.name))), t); }
 function remindText(t, only){
   const pending = only ? [only] : (t.assignees || []).filter(a => !aDone(a.status)).map(a => a.name);
-  return fillTpl(tplText('remind'), tplVars(t, pending));
+  return withCode(fillTpl(tplText('remind'), tplVars(t, pending)), t);
 }
 function execCopy(text){
   const ta = document.createElement('textarea');
@@ -974,7 +975,7 @@ const searchHtml = ph => '<div class="search">'+ic('search', 18)+'<input type="s
 /* ================= Мои задачи ================= */
 function viewMine(){
   const all = mineTasks();
-  let h = '<div class="quick"><input type="text" id="quick" placeholder="Быстрая задача — введите и нажмите «Ввод»" aria-label="Быстрая задача" autocomplete="off" enterkeyhint="done"><button type="button" class="btn" data-a="voice" aria-label="Быстрая заметка голосом">'+ic('mic', 20)+'</button><button type="button" class="btn primary" data-a="quick-add" aria-label="Добавить">'+ic('plus', 20)+'</button></div>';
+  let h = '<div class="quick"><input type="text" id="quick" placeholder="Быстрая задача — введите и нажмите «Ввод»" aria-label="Быстрая задача" autocomplete="off" enterkeyhint="done"><button type="button" class="btn" data-a="paste-task" aria-label="Вставить задачу из сообщения" title="Вставить задачу из сообщения">'+ic('copy', 20)+'</button><button type="button" class="btn" data-a="voice" aria-label="Быстрая заметка голосом">'+ic('mic', 20)+'</button><button type="button" class="btn primary" data-a="quick-add" aria-label="Добавить">'+ic('plus', 20)+'</button></div>';
   if (!all.length) return h + '<div class="empty"><b>Личных задач нет</b>Здесь собираются задачи без исполнителей — то, что делаете сами.</div>';
   h += '<div class="bar">'+(all.length > 5 ? searchHtml('Поиск по моим задачам') : '<span class="sp"></span>')+viewToggle('mine')+'</div>';
   const list = all.filter(matchQ);
@@ -986,11 +987,11 @@ function viewMine(){
 /* ================= Указания ================= */
 function viewOrders(){
   const all = orderTasks();
-  if (!all.length) return '<div class="empty"><b>Указаний пока нет</b>Поставьте задачу и выберите исполнителей — она появится здесь. Статус каждого исполнителя вы отмечаете сами.<br><button type="button" class="btn primary" data-a="new-order">'+ic('plus', 18)+'Новое указание</button></div>';
+  if (!all.length) return '<div class="empty"><b>Указаний пока нет</b>Поставьте задачу и выберите исполнителей — она появится здесь. Статус каждого исполнителя вы отмечаете сами.<br><button type="button" class="btn primary" data-a="new-order">'+ic('plus', 18)+'Новое указание</button> <button type="button" class="btn" data-a="paste-task">'+ic('copy', 18)+'Вставить задачу</button></div>';
   const names = new Map();
   all.filter(t => !isDone(t)).forEach(t => t.assignees.forEach(a => { if (!aDone(a.status)) names.set(a.name, (names.get(a.name) || 0) + 1); }));
   if (U.asg && !names.has(U.asg) && !all.some(t => t.assignees.some(a => a.name === U.asg))) U.asg = '';
-  let h = '<div class="bar">'+searchHtml('Поиск по указаниям и исполнителям')+viewToggle('orders')+'</div>';
+  let h = '<div class="bar">'+searchHtml('Поиск по указаниям и исполнителям')+'<button type="button" class="btn" data-a="paste-task" aria-label="Вставить задачу из сообщения" title="Вставить задачу из сообщения">'+ic('copy', 18)+'</button>'+viewToggle('orders')+'</div>';
   if (names.size > 1 || U.asg) {
     h += '<div class="fchips" role="group" aria-label="Фильтр по исполнителю"><button type="button" class="fchip'+(U.asg ? '' : ' on')+'" data-a="asg" data-name="">Все</button>'
       + Array.from(names.entries()).sort((a, b) => a[0].localeCompare(b[0], 'ru')).map(x => '<button type="button" class="fchip'+(U.asg === x[0] ? ' on' : '')+'" data-a="asg" data-name="'+esc(x[0])+'">'+esc(x[0])+'<span class="n">'+x[1]+'</span></button>').join('') + '</div>';
@@ -1747,7 +1748,9 @@ function openSettings(){
   const sh = openSheet(head('Настройки') + '<div class="sh-b">'
     + '<div class="fld"><span class="lbl">Оформление</span><div class="seg" id="st-th">'+[['', 'Как в системе'], ['light', 'Светлое'], ['dark', 'Тёмное']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+(D.settings.theme === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div></div>'
     + '<label class="fld"><span class="lbl">Подпись в сообщениях</span><textarea id="st-sign" rows="2" maxlength="300" placeholder="Например: Начальник штаба Петров">'+esc(D.settings.sign || '')+'</textarea><span class="hint" style="margin:0">Добавляется в конец текста «Поставить задачу» и «Напомнить».</span></label>'
-    + '<div class="set-sec"><h3>Сообщения в мессенджер</h3><p>Шаблоны текста для кнопок «Поставить задачу» и «Напомнить».</p><div class="btn-row"><button type="button" class="btn sm" data-s="tpl">'+ic('send', 16)+'Шаблоны</button></div></div>'
+    + '<div class="set-sec"><h3>Сообщения в мессенджер</h3><p>Шаблоны текста для кнопок «Поставить задачу» и «Напомнить».</p><div class="btn-row"><button type="button" class="btn sm" data-s="tpl">'+ic('send', 16)+'Шаблоны</button></div>'
+    +   '<label class="switch"><input type="checkbox" id="st-code"'+(D.settings.embedCode ? ' checked' : '')+'><span>Добавлять код СКиПП в конец сообщения</span></label>'
+    +   '<p class="hint" style="margin:0">С кодом задача переносится в СКиПП на другом устройстве без потерь (кнопка «Вставить задачу»). Получатели без приложения увидят строку вида ⟦СКиПП:…⟧.</p></div>'
     + '<div class="set-sec"><h3>Вид списков</h3>'
     +   [['mine','Мои задачи'],['orders','Указания']].map(x => '<div class="set-line"><span>'+x[1]+'</span><div class="seg" data-view="'+x[0]+'">'+[['list','Список'],['kanban','Канбан']].map(v => '<button type="button" data-v="'+v[0]+'" class="'+(D.settings.views[x[0]] === v[0] ? 'on' : '')+'">'+v[1]+'</button>').join('')+'</div></div>').join('')
     +   '<p>В канбане столбцы — это статусы. Их можно добавить, переименовать и перекрасить.</p><div class="btn-row"><button type="button" class="btn sm" data-s="st-task">'+ic('boards', 16)+'Мои статусы</button><button type="button" class="btn sm" data-s="st-asg">'+ic('me', 16)+'Статусы исполнителей</button></div></div>'
@@ -1768,6 +1771,7 @@ function openSettings(){
   $('#st-th', sh).addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; D.settings.theme = b.dataset.v; save(); applyTheme(); $$('#st-th button', sh).forEach(x => x.classList.toggle('on', x === b)); });
   $('#st-sign', sh).addEventListener('input', e => { D.settings.sign = e.target.value; save(); });
   $('#st-splash', sh).addEventListener('change', e => { D.settings.splash = e.target.checked; save(); });
+  $('#st-code', sh).addEventListener('change', e => { D.settings.embedCode = e.target.checked; save(); });
   const al = $('#st-al', sh); if (al) al.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; D.settings.autolock = Number(b.dataset.v); save(); $$('button', al).forEach(x => x.classList.toggle('on', x === b)); });
   $$('[data-view]', sh).forEach(g => g.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; D.settings.views[g.dataset.view] = b.dataset.v; save(); render(); $$('button', g).forEach(x => x.classList.toggle('on', x === b)); }));
   $('#st-file', sh).addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) { closeSheet(); restoreFrom(f); } });
@@ -2403,6 +2407,81 @@ function startIntro(){
   if (D.settings.splash !== false) showSplash(tour); else tour();
 }
 
+/* ================= перенос задачи через текст сообщения ================= */
+const CODE_RE = /⟦СКиПП:([A-Za-z0-9+/=]+)⟧/;
+function taskCode(t){
+  const o = {t:t.title, n:t.note || '', a:(t.assignees || []).map(a => a.name), d:t.due || '', p:t.priority || 'mid', c:(t.checklist || []).map(i => i.text).filter(Boolean), r:t.repeat || 'none', rd:t.repeatDays || null, m:t.remind == null ? null : t.remind, s:(D.settings.sign || '').trim()};
+  return '⟦СКиПП:' + b64e(new TextEncoder().encode(JSON.stringify(o))) + '⟧';
+}
+function readCode(text){
+  const m = String(text || '').match(CODE_RE); if (!m) return null;
+  try { const o = JSON.parse(new TextDecoder().decode(b64d(m[1]))); return o && o.t ? o : null; } catch (e) { return null; }
+}
+function parseMessage(text){
+  const code = readCode(text);
+  if (code) return {exact:true, title:code.t, note:code.n, names:code.a || [], due:code.d || '', priority:code.p || 'mid', checklist:code.c || [], repeat:code.r || 'none', repeatDays:code.rd, remind:code.m, author:code.s || ''};
+  const strip = s => s.replace(/^[\s📌👤⏰❗📅]+/u, '').trim();
+  const lines = String(text || '').replace(CODE_RE, '').split(/\r?\n/).map(s => s.trim());
+  const r = {exact:false, title:'', note:'', names:[], due:'', priority:'mid', checklist:[], repeat:'none', repeatDays:null, remind:null, author:''};
+  const rest = []; let structured = false, afterAsk = false;
+  lines.forEach(raw => {
+    const l = strip(raw); if (!l) { rest.push(''); return; }
+    let m;
+    if (/^(ЗАДАЧА|НАПОМИНАНИЕ)$/i.test(l)) { structured = true; return; }
+    if ((m = l.match(/^Кому:\s*(.+)$/i)) || (/^👤/u.test(raw) && (m = [0, l]))) { r.names = m[1].split(/\s*,\s*/).filter(Boolean); structured = true; return; }
+    if ((m = l.match(/^Срок:?\s*(?:до\s*)?(\d{2})\.(\d{2})\.(\d{4})/i))) { r.due = m[3] + '-' + m[2] + '-' + m[1]; structured = true; return; }
+    if (/^Срок:?\s*без срока/i.test(l)) { structured = true; return; }
+    if (/^Приоритет:\s*высокий/i.test(l)) { r.priority = 'high'; return; }
+    if ((m = l.match(/^По задаче:\s*(.+)$/i))) { r.title = m[1]; structured = true; return; }
+    if ((m = l.match(/^[—–-]\s+(.+)$/))) { r.checklist.push(m[1]); return; }
+    if (/^Прошу\s/i.test(l) || /^Напоминание$/i.test(l)) { afterAsk = true; return; }
+    if (afterAsk) { r.author = r.author ? r.author + ' ' + l : l; return; }
+    rest.push(l);
+  });
+  if (!structured) {
+    const p = parseVoice(text);
+    return {exact:false, title:p.title || String(text).trim().slice(0, 300), note:p.note, names:p.assignees.map(a => a.name), due:p.due, priority:p.priority, checklist:p.checklist.map(i => i.text), repeat:p.repeat, repeatDays:p.repeatDays, remind:p.remind, author:''};
+  }
+  const body = rest.join('\n').replace(/\n{2,}/g, '\n').trim().split('\n').filter(Boolean);
+  if (!r.title) r.title = body.shift() || '';
+  else if (body.length && !r.note) { /* остальное — подробности */ }
+  r.note = body.join('\n');
+  return r;
+}
+function openPasteTask(){
+  let mode = 'me';
+  const sh = openSheet(head('Вставить задачу') + '<div class="sh-b">'
+    + '<p class="hint" style="margin:0">Скопируйте сообщение с задачей в мессенджере и вставьте сюда. Приложение заполнит карточку, вам останется проверить и сохранить.</p>'
+    + '<button type="button" class="btn" id="pt-clip">'+ic('copy', 18)+'Вставить из буфера обмена</button>'
+    + '<textarea id="pt-text" rows="8" placeholder="Или вставьте текст вручную: нажмите и удерживайте → «Вставить»"></textarea>'
+    + '<div class="fld"><span class="lbl">Как добавить</span><div class="seg" id="pt-mode"><button type="button" data-v="me" class="on">Задача для меня</button><button type="button" data-v="copy">Копия как есть</button></div>'
+    + '<span class="hint" id="pt-mh" style="margin:0">Задача попадёт в «Мои задачи», автор сообщения — в подробности.</span></div>'
+    + '<p class="hint" id="pt-st" style="margin:0"></p>'
+    + '</div><div class="sh-f"><span class="sp"></span><button type="button" class="btn" data-close>Отмена</button><button type="button" class="btn primary" id="pt-go">Распознать</button></div>');
+  const ta = $('#pt-text', sh), stEl = $('#pt-st', sh);
+  const status = () => { const v = ta.value.trim(); stEl.textContent = !v ? '' : readCode(v) ? '✓ Найден код СКиПП — задача перенесётся точно.' : 'Кода СКиПП нет — текст будет разобран приблизительно, проверьте карточку.'; };
+  ta.addEventListener('input', status);
+  $('#pt-clip', sh).addEventListener('click', async () => {
+    try { const t = await navigator.clipboard.readText(); if (t) { ta.value = t; status(); } else toast('Буфер обмена пуст'); }
+    catch (e) { toast('Нет доступа к буферу. Вставьте текст в поле вручную'); ta.focus(); }
+  });
+  $('#pt-mode', sh).addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; mode = b.dataset.v; $$('#pt-mode button', sh).forEach(x => x.classList.toggle('on', x === b));
+    $('#pt-mh', sh).textContent = mode === 'me' ? 'Задача попадёт в «Мои задачи», автор сообщения — в подробности.' : 'Исполнители сохранятся — задача попадёт в «Указания». Удобно для переноса между своими устройствами.'; });
+  $('#pt-go', sh).addEventListener('click', () => {
+    const txt = ta.value.trim(); if (!txt) { toast('Вставьте текст задачи'); return; }
+    const p = parseMessage(txt);
+    if (!p.title) { toast('Не удалось найти суть задачи'); return; }
+    let note = p.note || '';
+    if (mode === 'me' && p.author) note = ('Поставил: ' + p.author + (note ? '\n' + note : '')).trim();
+    const task = {title:p.title, note:note, due:p.due || '', priority:p.priority || 'mid', repeat:p.repeat || 'none', repeatDays:p.repeatDays || null, remind:p.remind == null ? null : p.remind, status:firstT(),
+      checklist:(p.checklist || []).map(x => ({id:uid(), text:x, done:false})), assignees:mode === 'copy' ? (p.names || []).map(n => ({name:n, status:firstA()})) : []};
+    closeSheet();
+    openTaskForm(null, {task:task, forOrder:task.assignees.length > 0, noFocus:true});
+    toast(p.exact ? 'Задача перенесена — проверьте и сохраните' : 'Проверьте карточку и сохраните');
+  });
+  setTimeout(() => ta.focus(), 100);
+}
+
 /* ================= действия ================= */
 function openThing(kind, id){
   if (kind === 'task') { const t = D.tasks.find(x => x.id === id); if (t) openTaskForm(t); }
@@ -2438,6 +2517,7 @@ async function handle(a, el){
     case 'redo': redo(); break;
     case 'quick-add': quickAdd(); break;
     case 'voice': openVoice(); break;
+    case 'paste-task': openPasteTask(); break;
     case 'new-order': openTaskForm(null, {forOrder:true}); break;
     case 'st-menu': statusMenu(id, el.dataset.ai != null ? Number(el.dataset.ai) : null); break;
     case 'copy-order': { const t = D.tasks.find(x => x.id === id); if (t) copyText(orderText(t), 'Задача скопирована — вставьте в мессенджер'); break; }
