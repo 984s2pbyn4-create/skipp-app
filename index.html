@@ -390,14 +390,20 @@ body.locked .app,body.locked .tabbar,body.locked .fab,body.privacy .app,body.pri
 .splash{position:fixed;inset:0;z-index:180;background:radial-gradient(circle at 50% 35%, #2F5D46, #12251B 75%);color:#F0ECDE;display:flex;align-items:center;justify-content:center;padding:calc(24px + env(safe-area-inset-top, 0px)) 28px calc(24px + env(safe-area-inset-bottom, 0px));text-align:center;cursor:pointer;transition:opacity .35s ease}
 .splash.out{opacity:0}
 .sp-box{max-width:420px;display:flex;flex-direction:column;align-items:center}
-.sp-seal{width:120px;height:120px;border-radius:50%;box-shadow:0 10px 40px rgba(0,0,0,.4);animation:stamp .7s cubic-bezier(.2,1.4,.4,1) both}
-@keyframes stamp{0%{transform:scale(2.2) rotate(-25deg);opacity:0}60%{transform:scale(.92) rotate(4deg);opacity:1}100%{transform:scale(1) rotate(0)}}
-.sp-h{margin:22px 0 4px;font-size:30px;font-weight:700;letter-spacing:-.01em;animation:rise .5s .45s both}
-.sp-date{margin:0 0 18px;color:#A0D6B2;font-size:15px;animation:rise .5s .6s both}
+.sp-art{overflow:visible;width:min(62vw, 260px);height:auto;margin-top:-20px}
+.sp-hand{animation:hand 1.3s cubic-bezier(.55,0,.3,1) both}
+@keyframes hand{0%{transform:translateY(-420px)}34%{transform:translateY(-140px)}40%{transform:translateY(6px)}46%{transform:translateY(0) scaleY(.97)}60%{transform:translateY(0)}100%{transform:translateY(-480px)}}
+.sp-imprint{opacity:0;animation:imprint .5s .52s ease-out both;transform-origin:130px 214px}
+@keyframes imprint{0%{opacity:0;transform:scale(1.1)}35%{opacity:.95}100%{opacity:1;transform:scale(1)}}
+.sp-box{animation:shake .32s .5s both}
+@keyframes shake{0%,100%{transform:none}20%{transform:translate(-5px,3px)}40%{transform:translate(4px,-3px)}60%{transform:translate(-3px,2px)}80%{transform:translate(2px,-1px)}}
+.sp-h{margin:8px 0 4px;font-size:30px;font-weight:700;letter-spacing:-.01em;animation:rise .5s 1.15s both}
+.sp-date{margin:0 0 18px;color:#A0D6B2;font-size:15px;animation:rise .5s 1.3s both}
 .sp-fact{margin:6px 0;font-size:17px;line-height:1.4;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.12);border-radius:12px;padding:10px 14px;animation:rise .5s both}
-.sp-skip{margin-top:22px;font-size:13px;color:rgba(240,236,222,.55);animation:rise .5s 1.8s both}
+.sp-skip{margin-top:22px;font-size:14px;color:rgba(240,236,222,.7);animation:rise .5s 2.4s both, blink 2s 3s ease-in-out infinite}
+@keyframes blink{50%{opacity:.35}}
 @keyframes rise{from{opacity:0;transform:translateY(12px)}}
-@media (prefers-reduced-motion: reduce){.sp-seal,.sp-h,.sp-date,.sp-fact,.sp-skip{animation:none}}
+@media (prefers-reduced-motion: reduce){.sp-hand{display:none}.sp-imprint,.sp-box,.sp-h,.sp-date,.sp-fact,.sp-skip{animation:none;opacity:1}}
 .tour{position:fixed;inset:0;z-index:170;background:rgba(10,16,12,.55);display:flex;align-items:center;justify-content:center;padding:calc(16px + env(safe-area-inset-top, 0px)) 16px calc(16px + env(safe-area-inset-bottom, 0px))}
 .tour-box{position:relative;background:var(--surface);border-radius:22px;max-width:440px;width:100%;padding:34px 22px 20px;text-align:center;box-shadow:0 20px 50px rgba(0,0,0,.35);animation:up .25s ease}
 .tour-box h2{margin:14px 0 8px;font-size:21px}
@@ -2299,18 +2305,26 @@ function pickFacts(k){
   return out;
 }
 function greeting(){ const h = new Date().getHours(); return h < 5 ? 'Доброй ночи' : h < 12 ? 'Доброе утро' : h < 18 ? 'Добрый день' : h < 23 ? 'Добрый вечер' : 'Доброй ночи'; }
+const STAMP_SVG = '<svg class="sp-art" viewBox="0 0 260 300" width="260" height="300" aria-hidden="true">'
+  + '<g class="sp-imprint"><circle cx="130" cy="214" r="74" fill="rgba(0,0,0,.25)"/><image href="icon-512.png" x="58" y="142" width="144" height="144" clip-path="circle(72px at 72px 72px)"/></g>'
+  + '<g class="sp-hand">'
+  +   '<circle cx="130" cy="112" r="26" fill="#8a5a2b"/><circle cx="121" cy="103" r="8" fill="#a8743f"/><rect x="114" y="132" width="32" height="12" rx="5" fill="#6e4520"/>'
+  +   '<ellipse cx="130" cy="146" rx="26" ry="8" fill="#6e4520"/><rect x="119" y="146" width="22" height="44" fill="#7d5126"/><rect x="119" y="146" width="7" height="44" fill="#966232"/>'
+  +   '<rect x="64" y="184" width="132" height="12" rx="5" fill="#4a4f4b"/><path d="M70 194 L190 194 L212 262 Q213 274 200 274 L60 274 Q47 274 48 262 Z" fill="#2b2f2c"/><path d="M70 194 L96 194 L80 274 L60 274 Q47 274 48 262 Z" fill="#363b37"/>'
+  +   '<rect x="50" y="270" width="160" height="10" rx="4" fill="#1f4a33"/>'
+  + '</g></svg>';
 function showSplash(then){
   const facts = pickFacts(2);
   const dstr = new Date().toLocaleDateString('ru-RU', {weekday:'long', day:'numeric', month:'long'});
   const ov = document.createElement('div'); ov.className = 'splash'; ov.setAttribute('role', 'dialog'); ov.setAttribute('aria-label', 'Приветствие');
-  ov.innerHTML = '<div class="sp-box"><img class="sp-seal" src="icon-512.png" alt="" width="120" height="120"><h1 class="sp-h">'+esc(greeting())+'!</h1><p class="sp-date">'+esc(dstr.charAt(0).toUpperCase() + dstr.slice(1))+'</p>'
-    + facts.map((f, i) => '<p class="sp-fact" style="animation-delay:'+(0.9 + i * 0.5)+'s">'+esc(f)+'</p>').join('')
+  ov.innerHTML = '<div class="sp-box">'+STAMP_SVG+'<h1 class="sp-h">'+esc(greeting())+'!</h1><p class="sp-date">'+esc(dstr.charAt(0).toUpperCase() + dstr.slice(1))+'</p>'
+    + facts.map((f, i) => '<p class="sp-fact" style="animation-delay:'+(1.5 + i * 0.4)+'s">'+esc(f)+'</p>').join('')
     + '<p class="sp-skip">Коснитесь, чтобы продолжить</p></div>';
   document.body.appendChild(ov);
   let done = false;
   const close = () => { if (done) return; done = true; ov.classList.add('out'); setTimeout(() => { ov.remove(); then && then(); }, 350); };
   ov.addEventListener('click', close);
-  setTimeout(close, 4200);
+  setTimeout(() => { if (navigator.vibrate && !done) { try { navigator.vibrate([45, 30, 25]); } catch (e) {} } }, 520);
 }
 
 /* ================= обучение ================= */
