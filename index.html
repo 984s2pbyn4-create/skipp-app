@@ -12,17 +12,16 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="СКиПП">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
-<link href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&display=swap" rel="stylesheet" media="print" onload="this.media='all'">
 <style>
 :root{
   --bg:#ECEEE8; --surface:#FFFFFF; --surface-2:#F5F6F2; --sunk:#E3E6DE;
-  --ink:#1A211D; --ink-2:#4B5550; --ink-3:#7A847E; --line:#D6DBD2; --line-2:#C5CCC1;
+  --ink:#1A211D; --ink-2:#4B5550; --ink-3:#5F6963; --line:#D6DBD2; --line-2:#C5CCC1;
   --accent:#2F5D46; --accent-ink:#FFFFFF; --accent-soft:#DCE8E0;
   --red:#B3372B; --red-soft:#F6E1DE; --amber:#B8730B; --amber-soft:#F7EBD5;
   --st-control:#56688A; --st-today:#B8730B; --st-collect:#7457A0; --st-done:#2E7D52; --st-sent:#2F7482;
   --shadow:0 1px 0 rgba(26,33,29,.06), 0 2px 8px rgba(26,33,29,.05);
   --r:14px; --r-s:10px;
-  --font:"Golos Text", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font:-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
   color-scheme:light;
   box-sizing:border-box;
   padding-top:env(safe-area-inset-top, 0px);
@@ -31,7 +30,7 @@
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
     --bg:#101412; --surface:#191E1B; --surface-2:#1F2521; --sunk:#0B0E0C;
-    --ink:#E6EBE7; --ink-2:#A9B3AC; --ink-3:#77827B; --line:#2B322E; --line-2:#3A433E;
+    --ink:#E6EBE7; --ink-2:#A9B3AC; --ink-3:#85918A; --line:#2B322E; --line-2:#3A433E;
     --accent:#86BC9C; --accent-ink:#0D1811; --accent-soft:#1F3128;
     --red:#E2766A; --red-soft:#3A1E1B; --amber:#E0A447; --amber-soft:#33291A;
     --st-control:#8FA2C6; --st-today:#E0A447; --st-collect:#B198D8; --st-done:#6CC08F; --st-sent:#6DB8C6;
@@ -41,7 +40,7 @@
 }
 :root[data-theme="dark"]{
   --bg:#101412; --surface:#191E1B; --surface-2:#1F2521; --sunk:#0B0E0C;
-  --ink:#E6EBE7; --ink-2:#A9B3AC; --ink-3:#77827B; --line:#2B322E; --line-2:#3A433E;
+  --ink:#E6EBE7; --ink-2:#A9B3AC; --ink-3:#85918A; --line:#2B322E; --line-2:#3A433E;
   --accent:#86BC9C; --accent-ink:#0D1811; --accent-soft:#1F3128;
   --red:#E2766A; --red-soft:#3A1E1B; --amber:#E0A447; --amber-soft:#33291A;
   --st-control:#8FA2C6; --st-today:#E0A447; --st-collect:#B198D8; --st-done:#6CC08F; --st-sent:#6DB8C6;
@@ -67,7 +66,7 @@ a{color:var(--accent)}
 .top{position:sticky;top:env(safe-area-inset-top, 0px);z-index:20;background:var(--bg);display:flex;align-items:center;gap:8px;padding:14px 16px 10px}
 .top h1{margin:0;font-size:28px;line-height:1.1;font-weight:700;letter-spacing:-.02em;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .top .acts{display:flex;gap:4px}
-main{padding:4px 16px 120px;max-width:1120px;width:100%}
+main{padding:4px 16px calc(170px + env(safe-area-inset-bottom, 0px));max-width:1120px;width:100%}
 .icon-btn{display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;border-radius:12px;border:0;background:transparent;color:var(--ink-2)}
 .icon-btn:hover{background:var(--sunk)}
 .sync-dot{width:10px;height:10px;border-radius:50%;background:var(--ink-3)}
@@ -140,7 +139,6 @@ input:focus,select:focus,textarea:focus{outline:none;border-color:var(--accent);
 @media (min-width:1200px){ .list.grid2{grid-template-columns:repeat(3, minmax(0,1fr))} }
 .card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:var(--r);padding:13px 14px;box-shadow:var(--shadow);cursor:pointer;min-width:0}
 .card:hover{border-color:var(--line-2)}
-.card.pr-high{border-left:4px solid var(--red);padding-left:11px}
 .card.done .t-title{color:var(--ink-3);text-decoration:line-through;text-decoration-thickness:1px}
 .t-head{display:flex;gap:10px;align-items:flex-start}
 .t-title{font-weight:600;font-size:16px;line-height:1.3;flex:1;min-width:0;overflow-wrap:anywhere}
@@ -354,8 +352,8 @@ body.lock{overflow:hidden}
 .pin-dots{display:flex;gap:16px;margin-bottom:28px}
 .pin-dots i{width:14px;height:14px;border-radius:50%;border:2px solid var(--ink-3)}
 .pin-dots i.on{background:var(--ink);border-color:var(--ink)}
-.pin-dots.shake{animation:shake .35s}
-@keyframes shake{25%{transform:translateX(-8px)}50%{transform:translateX(8px)}75%{transform:translateX(-4px)}}
+.pin-dots.shake{animation:pin-shake .35s}
+@keyframes pin-shake{25%{transform:translateX(-8px)}50%{transform:translateX(8px)}75%{transform:translateX(-4px)}}
 .pad{display:grid;grid-template-columns:repeat(3, 76px);gap:14px 22px}
 .pad button{width:76px;height:76px;border-radius:50%;border:0;background:var(--surface);box-shadow:var(--shadow);font-size:28px;font-weight:500}
 .pad button:active{background:var(--sunk)}
@@ -416,6 +414,36 @@ body.locked .app,body.locked .tabbar,body.locked .fab,body.privacy .app,body.pri
 .tour-nav{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
 .al-opt{flex-direction:column;align-items:flex-start;text-align:left;white-space:normal;padding:12px 14px;gap:4px;min-height:0;width:100%}
 .al-opt span{font-weight:400;font-size:14px;color:var(--ink-2)}
+.tools{display:flex;align-items:center;gap:8px;margin:0 0 14px}
+.btn.ghost-b{border-color:var(--line);background:var(--surface-2)}
+.meta.soon{color:var(--ink);font-weight:600}
+.meta.pr{color:var(--ink);font-weight:600}
+.asg-sum{display:flex;align-items:center;gap:8px;width:100%;min-height:40px;border:0;background:none;padding:2px 0;font-size:14px;font-weight:600;color:var(--ink-2);text-align:left}
+.asg-sum.ok{color:var(--accent)}
+.asg-sum .chev{margin-left:auto;display:inline-flex;transition:transform .15s ease-out}
+.asg-sum.on .chev{transform:rotate(180deg)}
+.asg-row .pill{border-radius:7px;background:transparent}
+.set-menu button{gap:14px;padding:12px}
+.set-menu .ic{color:var(--accent)}
+.sm-t{display:flex;flex-direction:column;min-width:0}
+.sm-t small{color:var(--ink-3);font-size:13px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.icon-btn,.st-ed .icon-btn,.dw-row .icon-btn{width:44px;height:44px}
+.btn.sm,.card-acts .btn{min-height:44px}
+.seg.vt button{min-height:44px}
+.chip{padding:2px 2px 2px 12px}
+.chip button{width:36px;height:36px}
+.tabbar button{font-size:12px}
+::selection{background:var(--accent-soft);color:var(--ink)}
+input,textarea{caret-color:var(--accent)}
+.sp-skip{animation:rise .4s .3s both, blink 2s 1.5s ease-in-out infinite}
+@media (prefers-reduced-motion: reduce){.asg-sum .chev{transition:none}}
+@media (hover:none){
+.icon-btn:hover{background:transparent}
+.nav button:not(.on):hover,.menu button:hover,.cl-it:hover{background:none}
+.row:hover{background:transparent}
+.card:hover{border-color:var(--line)}
+.btn:not(.primary):not(.danger):not(.danger-o):not(.ghost):hover{border-color:var(--line-2)}
+}
 .toast{position:fixed;left:50%;bottom:calc(140px + env(safe-area-inset-bottom, 0px));transform:translateX(-50%);z-index:200;background:var(--ink);color:var(--bg);padding:11px 16px;border-radius:12px;font-size:15px;font-weight:500;max-width:calc(100% - 32px);box-shadow:0 8px 24px rgba(0,0,0,.25);animation:up .2s ease}
 @media (min-width:900px){ .toast{bottom:40px} }
 </style>
@@ -478,6 +506,8 @@ const IC = {
   search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>', medal:'<circle cx="12" cy="15" r="5"/><path d="M8.5 11L6 3h4l2 4 2-4h4l-2.5 8"/>',
   up:'<path d="M12 19V5M5 12l7-7 7 7"/>', down:'<path d="M12 5v14M19 12l-7 7-7-7"/>', list:'<path d="M9 6h12M9 12h12M9 18h12M4 6h.01M4 12h.01M4 18h.01"/>',
   mic:'<rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4M8 22h8"/>',
+  clip:'<rect x="8" y="3" width="8" height="4" rx="1"/><path d="M16 5h2a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2"/><path d="M9 13h6M9 17h4"/>',
+  lock:'<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
   flag:'<path d="M4 22V4a1 1 0 0 1 1-1h12l-2 4 2 4H5"/>', restore:'<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/>'
 };
 const ic = (n, s=20) => '<svg class="ic" width="'+s+'" height="'+s+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">'+IC[n]+'</svg>';
@@ -916,21 +946,30 @@ function taskCard(t, o){
     + '<div class="t-head"><div class="t-title">'+esc(t.title)+'</div></div>'
     + (t.note ? '<div class="t-note">'+esc(t.note)+'</div>' : '')
     + '<div class="meta-row">'
-    + '<span class="meta'+(od ? ' bad' : soon ? ' warn' : '')+'">'+ic('cal', 14)+esc(dueLabel(t))+'</span>'
-    + (t.priority === 'high' ? '<span class="meta bad">'+ic('flag', 14)+'Высокий</span>' : '')
+    + '<span class="meta'+(od ? ' bad' : soon ? ' soon' : '')+'">'+ic('cal', 14)+esc(dueLabel(t))+'</span>'
+    + (t.priority === 'high' ? '<span class="meta pr">'+ic('flag', 14)+'Высокий</span>' : '')
     + (t.repeat && t.repeat !== 'none' ? '<span class="meta" title="Повторяется">'+ic('repeat', 14)+'</span>' : '')
-    + (remindActive(t) ? '<span class="meta warn" title="Сработало напоминание">'+ic('bell', 14)+'</span>' : '')
+    + (remindActive(t) ? '<span class="meta" title="Сработало напоминание">'+ic('bell', 14)+'</span>' : '')
     + (cl.length ? '<button type="button" class="cl-tg'+(clOpen ? ' on' : '')+'" data-a="cl-toggle" data-id="'+t.id+'" aria-expanded="'+clOpen+'" aria-label="Чек-лист: выполнено '+cd+' из '+cl.length+'">'+ic('check', 14)+cd+'/'+cl.length+'<span class="chev">'+ic('chevD', 14)+'</span></button>' : '')
-    + '<span class="sp"></span>' + (o.hideMine ? '' : (hasAsg(t) ? '<span class="meta">Мой статус</span>' : '') + statusPill(t.id, null, t.status, st))
+    + '<span class="sp"></span>' + (o.hideMine ? '' : statusPill(t.id, null, t.status, st))
     + '</div>';
   if (cl.length && clOpen) h += '<div class="cl-card">' + cl.map((i, ix) => '<button type="button" class="cl-it'+(i.done ? ' on' : '')+'" data-a="cl-item" data-id="'+t.id+'" data-ix="'+ix+'"'+(st ? ' disabled' : '')+' aria-pressed="'+!!i.done+'"><span class="box">'+(i.done ? ic('check', 14) : '')+'</span><span>'+esc(i.text)+'</span></button>').join('') + '</div>';
-  if (hasAsg(t)) h += '<div class="asg">' + (allReported(t) && !isDone(t) ? '<div class="all-rep">'+ic('check', 14)+'Все исполнители доложили — можно обобщать</div>' : '')
-    + t.assignees.map((a, i) => '<div class="asg-row'+(asgOverdue(t, a) ? ' bad' : '')+'"><span class="nm">'+esc(a.name)+'</span>'+statusPill(t.id, i, a.status, st)+'</div>').join('') + '</div>';
+  if (hasAsg(t)) {
+    const n = t.assignees.length, rep = t.assignees.filter(a => aDone(a.status)).length, odA = t.assignees.some(a => asgOverdue(t, a));
+    const ao = (U.asgOpen || {})[t.id], open = n === 1 || (ao != null ? ao : odA);
+    const rows = t.assignees.map((a, i) => '<div class="asg-row'+(asgOverdue(t, a) ? ' bad' : '')+'"><span class="nm">'+esc(a.name)+'</span>'+statusPill(t.id, i, a.status, st)+'</div>').join('');
+    const sumTxt = rep === n ? (isDone(t) ? 'Все доложили' : 'Все доложили — можно обобщать') : 'Доложили ' + rep + ' из ' + n;
+    h += '<div class="asg">' + (n > 1
+      ? '<button type="button" class="asg-sum'+(rep === n ? ' ok' : '')+(open ? ' on' : '')+'" data-a="asg-toggle" data-id="'+t.id+'" aria-expanded="'+open+'">'+ic(rep === n ? 'check' : 'me', 14)+'<span>'+sumTxt+'</span>'+(odA ? '<span class="meta bad">просрочка</span>' : '')+'<span class="chev">'+ic('chevD', 14)+'</span></button>'
+      : (rep === n && !isDone(t) ? '<div class="all-rep">'+ic('check', 14)+'Исполнитель доложил — можно обобщать</div>' : ''))
+      + (open ? rows : '') + '</div>';
+  }
   if (hasAsg(t) && !st && !o.compact) h += '<div class="card-acts"><button type="button" class="btn sm" data-a="copy-order" data-lp data-id="'+t.id+'" title="Долгое нажатие — Поделиться">'+ic('send', 16)+'Поставить задачу</button>'
     + '<button type="button" class="btn sm" data-a="copy-remind" data-lp data-id="'+t.id+'" title="Долгое нажатие — Поделиться"'+(isDone(t) || allReported(t) ? ' disabled' : '')+'>'+ic('bell', 16)+'Напомнить</button></div>';
   if (st) h += '<div class="card-acts"><button type="button" class="btn sm" data-a="restore" data-id="'+t.id+'">'+ic('restore', 16)+'Вернуть в работу</button><button type="button" class="btn sm danger-o" data-a="del-task" data-id="'+t.id+'" aria-label="Удалить">'+ic('trash', 16)+'</button></div>';
   return h + '</article>';
 }
+function toolsRow(key){ return '<div class="tools"><button type="button" class="btn sm ghost-b" data-a="paste-task">'+ic('clip', 18)+'Вставить задачу</button><span class="sp"></span>'+viewToggle(key)+'</div>'; }
 function viewToggle(key){
   const v = D.settings.views[key] || 'list';
   return '<div class="seg vt" role="group" aria-label="Вид"><button type="button" data-a="set-view" data-key="'+key+'" data-v="list" class="'+(v === 'list' ? 'on' : '')+'" aria-label="Списком" title="Списком">'+ic('list', 16)+'</button><button type="button" data-a="set-view" data-key="'+key+'" data-v="kanban" class="'+(v === 'kanban' ? 'on' : '')+'" aria-label="Канбан" title="Канбан">'+ic('boards', 16)+'</button></div>';
@@ -977,9 +1016,10 @@ const searchHtml = ph => '<div class="search">'+ic('search', 18)+'<input type="s
 /* ================= Мои задачи ================= */
 function viewMine(){
   const all = mineTasks();
-  let h = '<div class="quick"><input type="text" id="quick" placeholder="Быстрая задача — введите и нажмите «Ввод»" aria-label="Быстрая задача" autocomplete="off" enterkeyhint="done"><button type="button" class="btn" data-a="paste-task" aria-label="Вставить задачу из сообщения" title="Вставить задачу из сообщения">'+ic('copy', 20)+'</button><button type="button" class="btn" data-a="voice" aria-label="Быстрая заметка голосом">'+ic('mic', 20)+'</button><button type="button" class="btn primary" data-a="quick-add" aria-label="Добавить">'+ic('plus', 20)+'</button></div>';
+  let h = '<div class="quick"><input type="text" id="quick" placeholder="Быстрая задача — введите и нажмите «Ввод»" aria-label="Быстрая задача" autocomplete="off" enterkeyhint="done"><button type="button" class="btn primary" data-a="quick-add" aria-label="Добавить">'+ic('plus', 20)+'</button></div>';
+  h += toolsRow('mine');
   if (!all.length) return h + '<div class="empty"><b>Личных задач нет</b>Здесь собираются задачи без исполнителей — то, что делаете сами.</div>';
-  h += '<div class="bar">'+(all.length > 5 ? searchHtml('Поиск по моим задачам') : '<span class="sp"></span>')+viewToggle('mine')+'</div>';
+  if (all.length > 5) h += '<div class="bar">'+searchHtml('Поиск по моим задачам')+'</div>';
   const list = all.filter(matchQ);
   if (!list.length) return h + '<div class="empty">Ничего не найдено по запросу «'+esc(U.search)+'».</div>';
   if (D.settings.views.mine === 'kanban') return h + kanbanHtml(list, 'mine');
@@ -989,11 +1029,11 @@ function viewMine(){
 /* ================= Указания ================= */
 function viewOrders(){
   const all = orderTasks();
-  if (!all.length) return '<div class="empty"><b>Указаний пока нет</b>Поставьте задачу и выберите исполнителей — она появится здесь. Статус каждого исполнителя вы отмечаете сами.<br><button type="button" class="btn primary" data-a="new-order">'+ic('plus', 18)+'Новое указание</button> <button type="button" class="btn" data-a="paste-task">'+ic('copy', 18)+'Вставить задачу</button></div>';
+  if (!all.length) return '<div class="empty"><b>Указаний пока нет</b>Поставьте задачу и выберите исполнителей — она появится здесь. Статус каждого исполнителя вы отмечаете сами.<br><button type="button" class="btn primary" data-a="new-order">'+ic('plus', 18)+'Новое указание</button> <button type="button" class="btn" data-a="paste-task">'+ic('clip', 18)+'Вставить задачу</button></div>';
   const names = new Map();
   all.filter(t => !isDone(t)).forEach(t => t.assignees.forEach(a => { if (!aDone(a.status)) names.set(a.name, (names.get(a.name) || 0) + 1); }));
   if (U.asg && !names.has(U.asg) && !all.some(t => t.assignees.some(a => a.name === U.asg))) U.asg = '';
-  let h = '<div class="bar">'+searchHtml('Поиск по указаниям и исполнителям')+'<button type="button" class="btn" data-a="paste-task" aria-label="Вставить задачу из сообщения" title="Вставить задачу из сообщения">'+ic('copy', 18)+'</button>'+viewToggle('orders')+'</div>';
+  let h = '<div class="bar">'+searchHtml('Поиск по указаниям и исполнителям')+'</div>' + toolsRow('orders');
   if (names.size > 1 || U.asg) {
     h += '<div class="fchips" role="group" aria-label="Фильтр по исполнителю"><button type="button" class="fchip'+(U.asg ? '' : ' on')+'" data-a="asg" data-name="">Все</button>'
       + Array.from(names.entries()).sort((a, b) => a[0].localeCompare(b[0], 'ru')).map(x => '<button type="button" class="fchip'+(U.asg === x[0] ? ' on' : '')+'" data-a="asg" data-name="'+esc(x[0])+'">'+esc(x[0])+'<span class="n">'+x[1]+'</span></button>').join('') + '</div>';
@@ -1747,56 +1787,73 @@ function restoreFrom(file){
 }
 
 /* ================= настройки ================= */
-function openSettings(){
-  const sh = openSheet(head('Настройки') + '<div class="sh-b">'
-    + '<div class="fld"><span class="lbl">Оформление</span><div class="seg" id="st-th">'+[['', 'Как в системе'], ['light', 'Светлое'], ['dark', 'Тёмное']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+(D.settings.theme === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div></div>'
-    + '<label class="fld"><span class="lbl">Подпись в сообщениях</span><textarea id="st-sign" rows="2" maxlength="300" placeholder="Например: Начальник штаба Петров">'+esc(D.settings.sign || '')+'</textarea><span class="hint" style="margin:0">Добавляется в конец текста «Поставить задачу» и «Напомнить».</span></label>'
-    + '<div class="set-sec"><h3>Сообщения в мессенджер</h3><p>Шаблоны текста для кнопок «Поставить задачу» и «Напомнить».</p><div class="btn-row"><button type="button" class="btn sm" data-s="tpl">'+ic('send', 16)+'Шаблоны</button></div>'
-    +   '<label class="switch"><input type="checkbox" id="st-code"'+(D.settings.embedCode ? ' checked' : '')+'><span>Добавлять код СКиПП в конец сообщения</span></label>'
-    +   '<p class="hint" style="margin:0">С кодом задача переносится в СКиПП на другом устройстве без потерь (кнопка «Вставить задачу»). Получатели без приложения увидят строку вида ⟦СКиПП:…⟧.</p></div>'
-    + '<div class="set-sec"><h3>Вид списков</h3>'
-    +   [['mine','Мои задачи'],['orders','Указания']].map(x => '<div class="set-line"><span>'+x[1]+'</span><div class="seg" data-view="'+x[0]+'">'+[['list','Список'],['kanban','Канбан']].map(v => '<button type="button" data-v="'+v[0]+'" class="'+(D.settings.views[x[0]] === v[0] ? 'on' : '')+'">'+v[1]+'</button>').join('')+'</div></div>').join('')
-    +   '<p>В канбане столбцы — это статусы. Их можно добавить, переименовать и перекрасить.</p><div class="btn-row"><button type="button" class="btn sm" data-s="st-task">'+ic('boards', 16)+'Мои статусы</button><button type="button" class="btn sm" data-s="st-asg">'+ic('me', 16)+'Статусы исполнителей</button></div></div>'
-    + '<div class="set-sec"><h3>Штаб</h3><div class="btn-row"><button type="button" class="btn sm" data-s="dash">'+ic('hq', 16)+'Блоки штаба</button></div>'
-    +   '<label class="switch"><input type="checkbox" id="st-splash"'+(D.settings.splash !== false ? ' checked' : '')+'><span>Заставка с фактами при запуске</span></label></div>'
-    + '<div class="set-sec"><h3>Обучение</h3><p>Короткий обзор возможностей и тестовые задачи, чтобы всё попробовать.</p><div class="btn-row"><button type="button" class="btn sm" data-s="tour">Обучение</button>'
-    +   (hasDemo() ? '<button type="button" class="btn sm danger-o" data-s="demo-off">Убрать образец</button>' : '<button type="button" class="btn sm" data-s="demo">Образец</button>') + '</div></div>'
-    + (SEC.decoy ? '' : ''
-    + '<div class="set-sec"><h3>Данные</h3><p>Всё хранится только на этом устройстве и никуда не отправляется. Чтобы перенести задачи на другое устройство, выгрузите файл, передайте его любым способом (Telegram, почта, AirDrop) и загрузите там.</p>'
+const SET_GROUPS = [
+  ['look', 'Оформление', 'grid', () => ({'':'Как в системе', light:'Светлое', dark:'Тёмное'}[D.settings.theme || ''] || 'Как в системе') + ' · заставка: ' + (D.settings.splash === false ? 'выкл.' : D.settings.splashMode === 'daily' ? 'раз в сутки' : 'каждый запуск')],
+  ['msg', 'Сообщения', 'send', () => 'Подпись, шаблоны' + (D.settings.embedCode ? ', код СКиПП' : '')],
+  ['lists', 'Списки и статусы', 'boards', () => 'Мои: ' + (D.settings.views.mine === 'kanban' ? 'канбан' : 'список') + ' · Указания: ' + (D.settings.views.orders === 'kanban' ? 'канбан' : 'список') + ' · блоки штаба'],
+  ['safe', 'Защита', 'lock', () => pinSet() ? 'Код включён' + (!SEC.decoy && auxRec() ? ' · тревога' : '') : 'Код выключен'],
+  ['data', 'Данные', 'download', () => SEC.decoy ? 'Очистка' : (D.settings.lastBackup ? 'Последняя выгрузка: ' + fmtDT(D.settings.lastBackup) : 'Выгрузка ещё не делалась')],
+  ['help', 'Обучение', 'hq', () => 'Обзор возможностей' + (hasDemo() ? ' · образец добавлен' : ' и образец')]
+];
+function settingsGroupHtml(g){
+  if (g === 'look') return '<div class="fld"><span class="lbl">Тема</span><div class="seg" id="st-th">'+[['', 'Как в системе'], ['light', 'Светлое'], ['dark', 'Тёмное']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+((D.settings.theme || '') === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div></div>'
+    + '<div class="set-sec"><h3>Заставка с фактами</h3><label class="switch"><input type="checkbox" id="st-splash"'+(D.settings.splash !== false ? ' checked' : '')+'><span>Показывать при запуске</span></label>'
+    + '<div class="seg" id="st-spm">'+[['always', 'Каждый запуск'], ['daily', 'Раз в сутки']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+((D.settings.splashMode || 'always') === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div></div>';
+  if (g === 'msg') return '<label class="fld"><span class="lbl">Подпись в сообщениях</span><textarea id="st-sign" rows="2" maxlength="300" placeholder="Например: Начальник штаба Петров">'+esc(D.settings.sign || '')+'</textarea><span class="hint" style="margin:0">Добавляется в конец текста «Поставить задачу» и «Напомнить».</span></label>'
+    + '<div class="set-sec"><h3>Шаблоны</h3><p>Текст для кнопок «Поставить задачу» и «Напомнить».</p><div class="btn-row"><button type="button" class="btn sm" data-s="tpl">'+ic('send', 16)+'Шаблоны</button></div></div>'
+    + '<div class="set-sec"><h3>Код СКиПП</h3><label class="switch"><input type="checkbox" id="st-code"'+(D.settings.embedCode ? ' checked' : '')+'><span>Добавлять код в конец сообщения</span></label>'
+    + '<p class="hint" style="margin:0">С кодом задача переносится в СКиПП на другом устройстве без потерь (кнопка «Вставить задачу»). Получатели без приложения увидят строку вида ⟦СКиПП:…⟧.</p></div>';
+  if (g === 'lists') return '<div class="fld"><span class="lbl">Вид списков</span>'
+    + [['mine','Мои задачи'],['orders','Указания']].map(x => '<div class="set-line"><span>'+x[1]+'</span><div class="seg" data-view="'+x[0]+'">'+[['list','Список'],['kanban','Канбан']].map(v => '<button type="button" data-v="'+v[0]+'" class="'+(D.settings.views[x[0]] === v[0] ? 'on' : '')+'">'+v[1]+'</button>').join('')+'</div></div>').join('') + '</div>'
+    + '<div class="set-sec"><h3>Статусы</h3><p>В канбане столбцы — это статусы. Их можно добавить, переименовать и перекрасить.</p><div class="btn-row"><button type="button" class="btn sm" data-s="st-task">'+ic('boards', 16)+'Мои статусы</button><button type="button" class="btn sm" data-s="st-asg">'+ic('me', 16)+'Статусы исполнителей</button></div></div>'
+    + '<div class="set-sec"><h3>Штаб</h3><div class="btn-row"><button type="button" class="btn sm" data-s="dash">'+ic('hq', 16)+'Блоки штаба</button></div></div>';
+  if (g === 'safe') return '<p style="margin:0">'+(pinSet() ? (pinRecV2() ? 'Код-пароль включён. Данные на устройстве зашифрованы этим кодом.' : 'Код-пароль включён.') : 'Код-пароль выключен. Задайте код из 4 цифр — он будет запрашиваться при запуске, а данные на устройстве будут зашифрованы.')+'</p>'
+    + (pinSet() ? '<div class="fld"><span class="lbl">Автоблокировка</span><div class="seg" id="st-al">'+[[0,'Сразу'],[1,'1 мин'],[5,'5 мин'],[15,'15 мин'],[-1,'Выкл']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+(autolockMin() === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div><span class="hint" style="margin:0">Если приложение свёрнуто дольше этого времени, при возврате снова нужен код. Пока свёрнуто, содержимое скрыто.</span></div>' : '')
+    + (SEC.decoy ? '' : '<div class="btn-row">' + (pinSet() ? '<button type="button" class="btn sm" data-s="pin-set">Сменить код</button><button type="button" class="btn sm danger-o" data-s="alarm">Тревога'+(auxRec() ? ' (вкл.)' : '')+'</button><button type="button" class="btn sm danger-o" data-s="pin-off">Выключить код</button>' : '<button type="button" class="btn sm primary" data-s="pin-set">Включить код-пароль</button>') + '</div>');
+  if (g === 'data') return (SEC.decoy ? '' : '<p style="margin:0">Всё хранится только на этом устройстве и никуда не отправляется. Чтобы перенести задачи на другое устройство, выгрузите файл, передайте его любым способом (Telegram, почта, AirDrop) и загрузите там.</p>'
     + '<div class="btn-row"><button type="button" class="btn sm" data-s="backup">'+ic('download', 16)+'Выгрузить данные</button><label class="btn sm" style="cursor:pointer">'+ic('upload', 16)+'Загрузить данные<input type="file" id="st-file" accept=".json,application/json" hidden></label><button type="button" class="btn sm" data-s="xlsx">'+ic('download', 16)+'Задачи в Excel</button></div>'
-    + '<p class="hint" style="margin:0">Загрузка заменяет все данные на устройстве данными из файла.</p></div>')
-    + '<div class="set-sec"><h3>Код-пароль и защита</h3><p>'+(pinSet() ? (pinRecV2() ? 'Включён. Данные на устройстве зашифрованы этим кодом.' : 'Включён.') : 'Выключен. Задайте код из 4 цифр — он будет запрашиваться при запуске, а данные на устройстве будут зашифрованы.')+'</p>'
-    + (pinSet() ? '<div class="set-line"><span>Автоблокировка</span><div class="seg" id="st-al">'+[[0,'Сразу'],[1,'1 мин'],[5,'5 мин'],[15,'15 мин'],[-1,'Выкл']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+(autolockMin() === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div></div><p class="hint" style="margin:0">Если приложение свёрнуто дольше этого времени, при возврате снова нужен код. Пока свёрнуто, содержимое скрыто.</p>' : '')
-    + '<div class="btn-row">'
-    +   (SEC.decoy ? '' : pinSet() ? '<button type="button" class="btn sm" data-s="pin-set">Сменить код</button><button type="button" class="btn sm danger-o" data-s="alarm">Тревога'+(auxRec() ? ' (вкл.)' : '')+'</button><button type="button" class="btn sm danger-o" data-s="pin-off">Выключить</button>' : '<button type="button" class="btn sm" data-s="pin-set">Включить код-пароль</button>')
-    + '</div></div>'
-    + '<div class="set-sec"><h3>Очистка</h3><div class="btn-row"><button type="button" class="btn sm danger-o" data-s="wipe">'+ic('trash', 16)+'Удалить все данные</button></div></div>'
-    + '</div><div class="sh-f"><span class="sp"></span><button type="button" class="btn primary" data-close>Готово</button></div>');
-  $('#st-th', sh).addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; D.settings.theme = b.dataset.v; save(); applyTheme(); $$('#st-th button', sh).forEach(x => x.classList.toggle('on', x === b)); });
-  $('#st-sign', sh).addEventListener('input', e => { D.settings.sign = e.target.value; save(); });
-  $('#st-splash', sh).addEventListener('change', e => { D.settings.splash = e.target.checked; save(); });
-  $('#st-code', sh).addEventListener('change', e => { D.settings.embedCode = e.target.checked; save(); });
-  const al = $('#st-al', sh); if (al) al.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; D.settings.autolock = Number(b.dataset.v); save(); $$('button', al).forEach(x => x.classList.toggle('on', x === b)); });
+    + '<p class="hint" style="margin:0">Загрузка заменяет все данные на устройстве данными из файла.</p>')
+    + '<div class="set-sec"><h3>Очистка</h3><div class="btn-row"><button type="button" class="btn sm danger-o" data-s="wipe">'+ic('trash', 16)+'Удалить все данные</button></div></div>';
+  return '<p style="margin:0">Короткий обзор возможностей и тестовые задачи, чтобы всё попробовать.</p><div class="btn-row"><button type="button" class="btn sm" data-s="tour">Обучение</button>'
+    + (hasDemo() ? '<button type="button" class="btn sm danger-o" data-s="demo-off">Убрать образец</button>' : '<button type="button" class="btn sm" data-s="demo">Образец</button>') + '</div>';
+}
+function openSettings(group){
+  if (!group) {
+    const root = openSheet(head('Настройки') + '<div class="menu set-menu">' + SET_GROUPS.map(g => '<button type="button" data-g="'+g[0]+'">'+ic(g[2], 22)+'<span class="sm-t"><b>'+g[1]+'</b><small>'+esc(g[3]())+'</small></span><span class="ck">'+ic('chevR', 18)+'</span></button>').join('') + '</div>', {small:true});
+    root.addEventListener('click', e => { const b = e.target.closest('[data-g]'); if (b) openSettings(b.dataset.g); });
+    return;
+  }
+  const gi = SET_GROUPS.find(x => x[0] === group) || SET_GROUPS[0];
+  const refreshRoot = () => { const r = SHEETS.length > 1 ? SHEETS[SHEETS.length - 2].ov : null; if (r) $$('.set-menu [data-g]', r).forEach(b => { const g = SET_GROUPS.find(x => x[0] === b.dataset.g); if (g) $('small', b).textContent = g[3](); }); };
+  const sh = openSheet(head(gi[1]) + '<div class="sh-b">' + settingsGroupHtml(group) + '</div><div class="sh-f"><span class="sp"></span><button type="button" class="btn primary" data-close>Готово</button></div>', {small:true, onClose:refreshRoot});
+  const on = (sel, ev, fn) => { const el = $(sel, sh); if (el) el.addEventListener(ev, fn); };
+  const segPick = (sel, fn) => on(sel, 'click', e => { const b = e.target.closest('button'); if (!b) return; fn(b.dataset.v); $$(sel + ' button', sh).forEach(x => x.classList.toggle('on', x === b)); });
+  segPick('#st-th', v => { D.settings.theme = v; save(); applyTheme(); });
+  segPick('#st-spm', v => { D.settings.splashMode = v; save(); });
+  segPick('#st-al', v => { D.settings.autolock = Number(v); save(); });
+  on('#st-sign', 'input', e => { D.settings.sign = e.target.value; save(); });
+  on('#st-splash', 'change', e => { D.settings.splash = e.target.checked; save(); });
+  on('#st-code', 'change', e => { D.settings.embedCode = e.target.checked; save(); });
   $$('[data-view]', sh).forEach(g => g.addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; D.settings.views[g.dataset.view] = b.dataset.v; save(); render(); $$('button', g).forEach(x => x.classList.toggle('on', x === b)); }));
-  const stf = $('#st-file', sh); if (stf) stf.addEventListener('change', e => { const f = e.target.files && e.target.files[0]; if (f) { closeSheet(); restoreFrom(f); } });
+  on('#st-file', 'change', e => { const f = e.target.files && e.target.files[0]; if (f) { while (SHEETS.length) closeSheet(); restoreFrom(f); } });
   sh.addEventListener('click', async e => {
     const b = e.target.closest('[data-s]'); if (!b) return;
     const k = b.dataset.s;
-    if (k === 'dash') { closeSheet(); openDashSettings(); }
+    if (k === 'dash') { while (SHEETS.length) closeSheet(); openDashSettings(); }
     else if (k === 'tpl') openTemplates();
-    else if (k === 'alarm') { closeSheet(); openAlarm(); }
-    else if (k === 'tour') { closeSheet(); openTour(); }
-    else if (k === 'demo') { closeSheet(); addDemo(); }
-    else if (k === 'demo-off') { closeSheet(); removeDemo(); }
+    else if (k === 'alarm') { while (SHEETS.length) closeSheet(); openAlarm(); }
+    else if (k === 'tour') { while (SHEETS.length) closeSheet(); openTour(); }
+    else if (k === 'demo') { while (SHEETS.length) closeSheet(); addDemo(); }
+    else if (k === 'demo-off') { while (SHEETS.length) closeSheet(); removeDemo(); }
     else if (k === 'st-task') openStatusEditor('task');
     else if (k === 'st-asg') openStatusEditor('asg');
     else if (k === 'backup') backup();
-    else if (k === 'pin-set') { closeSheet(); setupPin(); }
-    else if (k === 'pin-off') { if (await confirmDlg('Выключить код-пароль? Данные на устройстве будут храниться без шифрования.', 'Выключить')) { await disablePin(); closeSheet(); toast('Код-пароль выключен'); } }
+    else if (k === 'pin-set') { while (SHEETS.length) closeSheet(); setupPin(); }
+    else if (k === 'pin-off') { if (await confirmDlg('Выключить код-пароль? Данные на устройстве будут храниться без шифрования.', 'Выключить')) { await disablePin(); while (SHEETS.length) closeSheet(); toast('Код-пароль выключен'); } }
     else if (k === 'xlsx') exportTasks();
     else if (k === 'wipe') {
       if (await confirmDlg('Удалить все задачи, доски, абонентов и журнал с этого устройства? Действие можно отменить кнопкой «Отменить» до закрытия страницы.', 'Удалить всё')) {
-        closeSheet(); commit(() => { const s = D.settings; D = blank(); D.settings = s; }); toast('Данные удалены');
+        while (SHEETS.length) closeSheet(); commit(() => { const s = D.settings; D = blank(); D.settings = s; }); toast('Данные удалены');
       }
     }
   });
@@ -2417,7 +2474,8 @@ let INTRO_DONE = false;
 function startIntro(){
   if (INTRO_DONE) return; INTRO_DONE = true;
   const tour = () => { let seen = false; try { seen = !!localStorage.getItem('skipp_tour'); } catch (e) {} if (!seen) openTour(); else setTimeout(backupReminder, 300); };
-  if (D.settings.splash !== false) showSplash(tour); else tour();
+  let shown = ''; try { shown = localStorage.getItem('skipp_splash_day') || ''; } catch (e) {}
+  if (D.settings.splash !== false && (D.settings.splashMode !== 'daily' || shown !== today())) { try { localStorage.setItem('skipp_splash_day', today()); } catch (e) {} showSplash(tour); } else tour();
 }
 
 /* ================= перенос задачи через текст сообщения ================= */
@@ -2610,6 +2668,7 @@ async function handle(a, el){
     case 'st-menu': statusMenu(id, el.dataset.ai != null ? Number(el.dataset.ai) : null); break;
     case 'copy-order': { const t = D.tasks.find(x => x.id === id); if (t) copyText(orderText(t), 'Задача скопирована — вставьте в мессенджер'); break; }
     case 'copy-remind': { const t = D.tasks.find(x => x.id === id); if (t) copyText(remindText(t), 'Напоминание скопировано — вставьте в мессенджер'); break; }
+    case 'asg-toggle': U.asgOpen = U.asgOpen || {}; U.asgOpen[id] = el.getAttribute('aria-expanded') !== 'true'; render(); break;
     case 'cl-toggle': U.clOpen[id] = !U.clOpen[id]; render(); break;
     case 'cl-item': commit(() => { const t = D.tasks.find(x => x.id === id); if (!t) return; const i = t.checklist[Number(el.dataset.ix)]; if (i) { i.done = !i.done; t.updatedAt = Date.now(); } }); break;
     case 'set-view': D.settings.views[el.dataset.key] = el.dataset.v; save(); render(); break;
