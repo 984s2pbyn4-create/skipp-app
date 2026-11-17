@@ -572,3 +572,80 @@ input,textarea{caret-color:var(--accent)}
 .tour-practice .btn{font-size:13px;min-height:48px;touch-action:manipulation}
 #tour-practice-result{grid-column:span 2;font-size:12px;color:var(--ink-2);min-height:35px}
 @media(max-width:550px){.template-field-main{grid-template-columns:1fr}#st-th{gap:4px}#st-th button{padding:6px 9px}}
+
+/* ========== СКиП v4.8: firm cinematic themes & iPad window-resizing ========== */
+:root[data-theme="command"],:root[data-theme="headquarters"],:root[data-theme="tactical"]{
+ --bg:#061611;--surface:#11231d;--surface-2:#19352b;--sunk:#06120e;--ink:#f4f3e8;--ink-2:#d1d8c6;--ink-3:#a4b9a9;
+ --line:#3c5941;--line-2:#61755a;--accent:#e5c17a;--accent-ink:#121811;--accent-soft:#284034;
+ --shadow:0 12px 30px #0006;color-scheme:dark;
+}
+:root[data-theme="headquarters"]{--bg:#091614;--surface:#182723;--surface-2:#22312b;--line:#334c41;--accent:#d4b78a;--accent-soft:#30463b}
+:root[data-theme="tactical"]{--bg:#091c17;--surface:#0d251e;--surface-2:#17372b;--line:#32614b;--accent:#81d6a6;--accent-soft:#1b4631}
+:root[data-theme="daylight"]{--bg:#e8eee8;--surface:#f9f9ef;--surface-2:#eaf0e3;--sunk:#dce6d7;--ink:#183e2d;--ink-2:#385945;--ink-3:#557361;--line:#bfd1c0;--line-2:#a3bca8;--accent:#237652;--accent-ink:#fff;--accent-soft:#d6e9d7;color-scheme:light}
+:root[data-theme="command"] .app,
+:root[data-theme="headquarters"] .app,
+:root[data-theme="tactical"] .app,
+:root[data-theme="daylight"] .app,
+:root[data-theme="hybrid"] .app,
+:root[data-theme="emerald"] .app{
+ background-image:linear-gradient(180deg,rgba(2,18,13,.52),rgba(3,17,12,.75)),url('assets/skip-theme-emerald.webp');
+ background-position:center top; background-size:cover;background-attachment:fixed;
+}
+:root[data-theme="daylight"] .app{background-image:linear-gradient(rgba(242,248,240,.91),rgba(237,247,235,.94)),url('assets/skip-theme-emerald.webp')}
+:root[data-theme="tactical"] .app{background-image:linear-gradient(rgba(3,34,24,.7),rgba(3,18,11,.81)),url('assets/skip-theme-emerald.webp')}
+:root[data-theme="headquarters"] .app{background-image:linear-gradient(rgba(5,12,12,.79),rgba(7,18,14,.88)),url('assets/skip-theme-emerald.webp')}
+:root[data-theme="command"] .card,:root[data-theme="command"] .col,:root[data-theme="command"] .side,
+:root[data-theme="hybrid"] .card,:root[data-theme="hybrid"] .col{
+ background:color-mix(in srgb,var(--surface) 91%,transparent);
+ border-color:color-mix(in srgb,var(--accent) 33%,var(--line));
+ box-shadow:inset 0 1px 0 #f9df9740,0 9px 22px #0006;
+}
+:root[data-theme="command"] .side{backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px)}
+:root[data-theme="command"] .top{background:color-mix(in srgb,var(--bg) 89%,transparent);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px)}
+/* Resize by actual available width as well as viewport: Stage Manager / Split View. */
+.app{width:100%;min-width:0;max-width:100%;overflow-x:clip}
+.main-wrap,main,.side,.top,.bar,.card,.row,.two,.ext-panel,.ext-filters,.ext-bulk-controls,.sh-b,.sh-f{min-width:0;max-width:100%}
+.top{flex-wrap:wrap;column-gap:8px;row-gap:6px}
+.top h1{min-width:100px;overflow-wrap:anywhere}
+.top .acts{flex-wrap:wrap;justify-content:flex-end;min-width:0;flex-shrink:1}
+.card-acts,.share-row,.btn-row,.ext-bulk-controls{flex-wrap:wrap}
+.card-acts .btn,.share-row .btn{min-width:0;white-space:normal;flex:1 1 140px;text-align:center}
+.ext-filters{display:flex;flex-wrap:wrap;gap:10px}
+.ext-filters>*{flex:1 1 150px;min-width:0}
+.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.two>.fld{min-width:0}
+input[type="date"],input[type="time"],input[type="datetime-local"]{
+ box-sizing:border-box;display:block;width:100%;max-width:100%;min-width:0;min-height:46px;padding:9px 10px;
+ background:var(--surface-2);color:var(--ink);border:1px solid var(--line-2);border-radius:11px;
+ font-size:16px;accent-color:var(--accent);color-scheme:inherit;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,input[type="time"]::-webkit-calendar-picker-indicator,input[type="datetime-local"]::-webkit-calendar-picker-indicator{opacity:.85;filter:invert(.3) sepia(.5) saturate(.5)}
+:root[data-theme="command"] input[type="date"],:root[data-theme="command"] input[type="time"],:root[data-theme="command"] input[type="datetime-local"]{color-scheme:dark}
+@media (max-width:950px){.side{display:none!important}.top{padding:14px 16px 10px}.tabbar{display:flex}.fab{bottom:calc(76px + env(safe-area-inset-bottom,0px))}}
+@media (max-width:720px){.two{grid-template-columns:minmax(0,1fr)}.top h1{font-size:clamp(21px,5vw,30px)}.top .acts .icon-btn{width:35px;height:35px}.ext-bulk-controls>*{min-width:0}}
+/* iOS long press: no selection / edit menu on share controls. */
+[data-lp], [data-practice]{-webkit-touch-callout:none!important;-webkit-user-select:none!important;user-select:none!important;touch-action:manipulation}
+[data-lp] *,[data-practice] *{-webkit-user-select:none!important;user-select:none!important;pointer-events:none}
+/* Login audio preflight */
+.lock-screen{overflow-y:auto;overscroll-behavior:contain;background:#051912 url('assets/skip-theme-emerald.webp') center / cover no-repeat}
+.lock-screen:before{content:'';position:fixed;inset:0;background:#02120bbd;pointer-events:none}
+.lock-box{position:relative;max-width:min(430px,calc(100vw - 24px));box-shadow:0 22px 75px #000a;border:1px solid #c9a36260;background:#071e17ed!important;max-height:calc(100dvh - 24px);overflow:auto;}
+.lock-box .mark-img.big{width:90px;height:90px;object-fit:cover;border-radius:19px;margin:0 auto 12px}
+.pin-sound-box{margin:12px 0 0;padding:12px;border:1px solid #967b4680;border-radius:14px;background:#15392bd9;text-align:left}
+.pin-sound-button{width:100%;min-height:44px;border:1px solid #e1bc7a;border-radius:11px;color:#f3dfaa;background:#2a4935;font:600 14px system-ui;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px}
+.pin-sound-button.armed{background:#245940;border-color:#f6d993;box-shadow:0 0 0 2px #d9b36a30,0 0 19px #71d69924}
+.pin-sound-dot{width:9px;height:9px;background:#a67d4e;border-radius:50%}
+.pin-sound-button.armed .pin-sound-dot{background:#81df9d;box-shadow:0 0 12px #7befaa}
+.pin-sound-help{font-size:12px;line-height:1.4;color:#c4d5bf;margin:10px 0 3px}
+.pin-sound-important{color:#f2e2bd}
+.pin-help-link{border:0;background:none;color:#f2ce87;text-decoration:underline;font-size:12px;padding:4px 0;cursor:pointer}
+.ski-sound.ski-highlight-sound{background:#336f4e;border-color:#ffda82;box-shadow:0 0 0 2px #f2d69488,0 0 22px #9fdd7a77;animation:sound-pulse 1.3s ease-in-out infinite}
+@keyframes sound-pulse{50%{box-shadow:0 0 0 4px #edd497a1,0 0 36px #aade96}}
+@media (prefers-reduced-motion:reduce){.ski-sound.ski-highlight-sound{animation:none}}
+.repeat-editor-row{display:flex;flex-wrap:wrap;gap:9px;align-items:center;justify-content:space-between}
+.repeat-editor-row>span{flex:1 1 180px}
+.repeat-editor-row .btn-row{justify-content:flex-end}
+/* Never hide the short side of the PIN pad in iPad windows. */
+@media(max-height:750px){.lock-box{padding:12px!important}.lock-box .pad button{height:43px!important;min-height:43px!important}.lock-box .mark-img.big{width:56px;height:56px}.pin-sound-box{padding:8px;margin-top:5px}.pin-sound-help{font-size:11px}}
+
+.pin-sound-button:not(.armed){box-shadow:0 0 0 2px #e9bd624d,0 0 22px #dfb66055}

@@ -1,7 +1,7 @@
 // СКиП v4.6: offline shell, versioned media cache and iOS byte-range playback.
-const CACHE = 'skipp-v47-templates';
+const CACHE = 'skipp-v48-cinematic';
 const PREFIX = 'skipp-v';
-const CORE = ['./','index.html','manifest.json','icon-180.png','icon-192.png','icon-512.png','styles.css','app.js','assets/skip-landscape-poster.jpg','assets/skip-portrait-poster.jpg','assets/skip-hud-landscape.jpg','assets/skip-hud-portrait.jpg'];
+const CORE = ['./','index.html','manifest.json','icon-180.png','icon-192.png','icon-512.png','styles.css','app.js','assets/skip-landscape-poster.jpg','assets/skip-portrait-poster.jpg','assets/skip-hud-landscape.jpg','assets/skip-hud-portrait.jpg','assets/skip-theme-emerald.webp'];
 const VOICES = ['assets/voice/01_dobroe_utro.mp3','assets/voice/02_dobryy_den.mp3','assets/voice/03_dobryy_vecher.mp3','assets/voice/04_dobroy_nochi.mp3'];
 CORE.push(...VOICES);
 const MEDIA = ['assets/skip-intro-landscape-720.mp4','assets/skip-intro-portrait-720.mp4','assets/skip-intro-landscape-1080.mp4','assets/skip-intro-portrait-1080.mp4'];
@@ -54,5 +54,5 @@ self.addEventListener('fetch',event=>{
   const url=new URL(req.url);if(url.origin!==location.origin)return;
   if(MEDIA.some(path=>new URL(path,self.registration.scope).pathname===url.pathname)) {event.respondWith(mediaResponse(req));return;}
   if(req.mode==='navigate') {event.respondWith(caches.match('index.html').then(hit=>{const update=refresh(req,'index.html');if(hit){event.waitUntil(update);return hit;}return update.then(r=>r||caches.match('./')).then(r=>r||new Response('Нет сети и сохранённой копии',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8'}}));}));return;}
-  if(CORE.some(path=>new URL(path,self.registration.scope).pathname===url.pathname)) {event.respondWith(caches.match(req).then(hit=>{const update=refresh(req);if(hit){event.waitUntil(update);return hit;}return update.then(r=>r||Response.error());}));return;}
+  if(CORE.some(path=>new URL(path,self.registration.scope).pathname===url.pathname)) {const cacheKey=new URL(url.pathname,self.location.origin).href;event.respondWith(caches.match(cacheKey).then(hit=>{const update=refresh(req,cacheKey);if(hit){event.waitUntil(update);return hit;}return update.then(r=>r||Response.error());}));return;}
 });

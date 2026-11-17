@@ -1,4 +1,4 @@
-/* СКиП v4.7 — гибкие шаблоны досок и обучение, совместимость с v4.6. */
+/* СКиП v4.8 — вход по PIN перед заставкой, радиозвук, адаптивность и управление задачами. */
 (function(){
 'use strict';
 
@@ -388,7 +388,7 @@ function storageWrite(key, value){ localStorage.setItem(key, value); if (localSt
 function safeIterations(n){ const v = Number(n == null ? ITER : n); if (!Number.isInteger(v) || v < 10000 || v > 2000000) throw new Error('Недопустимые параметры шифрования'); return v; }
 function blank(){
   return {v:2, tasks:[], boards:[], bcards:[], people:[], mcols:[], subs:[], journal:[], trash:[],
-    settings:{theme:'', sign:'', dash:{order:DASH_DEFAULT.slice(), hidden:{}, custom:{}},
+    settings:{theme:'emerald', splashQuality:'1080', splashSound:true, splashRadio:true, splashMode:'always', splash:true, sign:'', dash:{order:DASH_DEFAULT.slice(), hidden:{}, custom:{}},
       taskStatuses:clone(DEF_TASK_ST), asgStatuses:clone(DEF_ASG_ST), views:{mine:'list', orders:'list'},
       tpl:{order:'emoji', remind:'emoji', customOrder:'', customRemind:''}}};
 }
@@ -892,6 +892,7 @@ function taskCard(t, o){
   }
   if (hasAsg(t) && !st && !o.compact) h += '<div class="card-acts"><button type="button" class="btn sm" data-a="copy-order" data-lp data-id="'+t.id+'" title="Долгое нажатие — Поделиться">'+ic('send', 16)+'Поставить задачу</button>'
     + '<button type="button" class="btn sm" data-a="copy-remind" data-lp data-id="'+t.id+'" title="Долгое нажатие — Поделиться"'+(isDone(t) || allReported(t) ? ' disabled' : '')+'>'+ic('bell', 16)+'Напомнить</button></div>';
+  if (!st && !o.compact && !isDone(t)) h += '<div class="card-acts"><button type="button" class="btn sm" data-a="tomorrow-task" data-id="'+t.id+'">'+ic('cal',16)+'Перенести на завтра</button></div>';
   if (st) h += '<div class="card-acts"><button type="button" class="btn sm" data-a="restore" data-id="'+t.id+'">'+ic('restore', 16)+'Вернуть в работу</button><button type="button" class="btn sm danger-o" data-a="del-task" data-id="'+t.id+'" aria-label="Удалить">'+ic('trash', 16)+'</button></div>';
   return h + '</article>';
 }
@@ -1333,17 +1334,19 @@ function extBulkApply(){
   if(!chosen.length){toast('Выберите задачи из текущего списка');return;}
   const action=document.getElementById('ext-bulk-action')?.value;
   const value=document.getElementById('ext-bulk-value')?.value || '';
-  if(!['priority','due','status'].includes(action))return;
+  if(!['priority','due','status','delete','tomorrow'].includes(action))return;
   if(action==='priority' && !['high','mid','low'].includes(value)){toast('Выберите приоритет');return;}
   if(action==='status' && !tSt().some(x=>x.id===value)){toast('Выберите статус');return;}
   if(action==='due' && value && (!/^\d{4}-\d{2}-\d{2}$/.test(value) || !Number.isFinite(parseD(value).getTime()) || ymd(parseD(value))!==value)){toast('Некорректная дата');return;}
   const count=chosen.length;
-  if(!window.confirm('Изменить '+count+' задач?'))return;
+  if(!window.confirm(action==='delete'?'Переместить в корзину '+count+' выбранных задач?':'Изменить '+count+' задач?'))return;
   const ids=new Set(chosen.map(t=>t.id));
   if(commit(()=>{
     // One atomic application through the existing durable save queue.
     for(const t of D.tasks){
       if(!ids.has(t.id))continue;
+      if(action==='delete'){toTrash('task',t);continue;}
+      if(action==='tomorrow'){t.due=addDays(today(),1);t.updatedAt=Date.now();continue;}
       if(action==='priority'){t.priority=value;t.updatedAt=Date.now();}
       else if(action==='due'){t.due=value;t.updatedAt=Date.now();}
       else setOverall(t,value);
@@ -1387,7 +1390,7 @@ function viewSearch2(){
     +(extSavedFilters().length?'<div class="ext-saved"><p class="hint">Сохранённые фильтры</p>'+extSavedFilters().map(x=>'<div class="ext-saved-row"><button type="button" class="btn sm" data-a="ext-filter-load" data-id="'+esc(x.id)+'">'+esc(x.name)+'</button><button type="button" class="icon-btn" data-a="ext-filter-delete" data-id="'+esc(x.id)+'" aria-label="Удалить фильтр" title="Удалить фильтр">'+ic('x',16)+'</button></div>').join('')+'</div>':'')+'</div>'
     +'<section class="sec"><div class="sec-h"><h2>Задачи</h2><span class="n">'+tasks.length+'</span></div>'
     +(tasks.length?'<div class="ext-bulk-bar"><button type="button" class="btn sm" data-a="ext-bulk-all">Выбрать показанные</button><button type="button" class="btn sm" data-a="ext-bulk-clear">Снять выбор</button><span class="hint">Выбрано: '+page.items.filter(t=>EXT_BULK.has(t.id)&&!t.archived).length+'</span></div>'
-      +'<div class="ext-bulk-controls"><label>Действие<select id="ext-bulk-action"><option value="priority">Приоритет</option><option value="due">Срок</option><option value="status">Статус</option></select></label><label>Значение<span id="ext-bulk-value-host"><select id="ext-bulk-value"><option value="high">Высокий</option><option value="mid">Обычный</option><option value="low">Низкий</option></select></span></label><button type="button" class="btn sm primary" data-a="ext-bulk-apply">Применить</button></div>'
+      +'<div class="ext-bulk-controls"><label>Действие<select id="ext-bulk-action"><option value="priority">Приоритет</option><option value="due">Срок</option><option value="status">Статус</option><option value="tomorrow">Перенести на завтра</option><option value="delete">Удалить в корзину</option></select></label><label>Значение<span id="ext-bulk-value-host"><select id="ext-bulk-value"><option value="high">Высокий</option><option value="mid">Обычный</option><option value="low">Низкий</option></select></span></label><button type="button" class="btn sm primary" data-a="ext-bulk-apply">Применить</button></div>'
       +'<div class="list grid2">'+page.items.map(t=>'<div class="ext-bulk-item"><label class="ext-bulk-pick"><input type="checkbox" data-change="ext-bulk-check" data-id="'+esc(t.id)+'" '+(EXT_BULK.has(t.id)?'checked ':'')+(t.archived?'disabled ':'')+'aria-label="Выбрать задачу: '+esc(t.title)+'"> Выбрать</label>'+taskCard(t,{compact:true})+'</div>').join('')+'</div>':'<p class="hint">Совпадений нет.</p>')
     +pageControls(page,'search')+'</section>'
     +(extra.length?'<section class="sec"><div class="sec-h"><h2>Журнал</h2><span class="n">'+extra.length+'</span></div><div class="rows">'+extra.map(j=>'<div class="row" data-open="j" data-id="'+esc(j.id)+'"><div class="main"><div class="ttl">'+esc(j.brief||j.title||j.number||'Запись')+'</div><div class="sub">'+esc(j.date||'')+'</div></div></div>').join('')+'</div></section>':'');
@@ -1463,8 +1466,8 @@ function viewPlanner2(){
   }
   const repeats=upcomingRepeats();
   const repeatPanel='<section class="sec"><div class="sec-h"><h2>Повторяющиеся задачи</h2><span class="n">'+repeats.length+'</span></div>'
-    +(repeats.length?'<div class="ext-panel">'+repeats.map(x=>'<div class="ext-stat"><span>'+esc(x.task.title)+'</span><b>'+esc(fmtFull(x.next))+' · '+esc(x.cadence)+'</b></div>').join('')+'</div>':'<p class="hint">Нет активных повторяющихся задач.</p>')
-    +'<p class="hint">Следующая задача создаётся при завершении текущей. Повторы заранее не создаются.</p></section>';
+    +(repeats.length?'<div class="ext-panel">'+repeats.map(x=>'<div class="ext-stat repeat-editor-row"><span>'+esc(x.task.title)+'</span><b>'+esc(fmtFull(x.next))+' · '+esc(x.cadence)+'</b><div class="btn-row"><button type="button" class="btn sm" data-a="repeat-edit" data-id="'+esc(x.task.id)+'">Изменить</button><button type="button" class="btn sm danger-o" data-a="repeat-stop" data-id="'+esc(x.task.id)+'">Удалить повтор</button></div></div>').join('')+'</div>':'<p class="hint">Нет активных повторяющихся задач.</p>')
+    +'<button type="button" class="btn sm primary" data-a="repeat-new">'+ic('plus',16)+'Новая повторяющаяся задача</button><p class="hint">Следующая задача создаётся при завершении текущей. Повторы заранее не создаются.</p></section>';
   return repeatPanel+'<div class="ext-panel"><h2>План на 14 дней</h2><p class="hint">Задачи сгруппированы по сроку. Для изменения даты откройте карточку.</p><button class="btn sm" data-a="tab" data-tab="cal">'+ic('cal',16)+'Открыть календарь</button></div>'
     +days.map(d=>'<section class="sec"><div class="sec-h"><h2>'+esc(parseD(d.date).toLocaleDateString('ru-RU',{weekday:'short',day:'numeric',month:'long'}))+'</h2><span class="n">'+d.tasks.length+'</span><span class="sp"></span><button class="btn sm" data-a="ext-new-day" data-day="'+d.date+'">'+ic('plus',16)+'</button></div>'+(d.tasks.length?'<div class="list grid2">'+d.tasks.map(t=>taskCard(t,{compact:true})).join('')+'</div>':'<p class="hint">Нет задач</p>')+'</section>').join('')
     +'<section class="sec"><div class="sec-h"><h2>Без срока</h2><span class="n">'+missing.length+'</span></div>'+(missing.length?'<div class="list grid2">'+missing.slice(0,30).map(t=>taskCard(t,{compact:true})).join('')+'</div>':'')+'</section>';
@@ -2284,7 +2287,7 @@ function restoreFrom(file){
 
 /* ================= настройки ================= */
 const SET_GROUPS = [
-  ['look', 'Оформление', 'grid', () => ({'':'Как в системе',light:'Светлое',dark:'Тёмное',emerald:'Изумрудный штаб',graphite:'Тактический графит',holo:'Голографический центр',hybrid:'Изумрудный HUD',executive:'Светлый командный'}[D.settings.theme || ''] || 'Как в системе') + ' · заставка: ' + (D.settings.splash === false ? 'выкл.' : D.settings.splashMode === 'daily' ? 'раз в сутки' : 'каждый запуск')],
+  ['look', 'Оформление', 'grid', () => ({'':'Как в системе',light:'Светлое',dark:'Тёмное',emerald:'Изумрудный штаб',graphite:'Тактический графит',holo:'Голографический центр',hybrid:'Изумрудный HUD',executive:'Светлый командный',command:'Командный HUD',headquarters:'Тёмный штаб',tactical:'Тактическая сетка',daylight:'Дневной изумруд'}[D.settings.theme || ''] || 'Как в системе') + ' · заставка: ' + (D.settings.splash === false ? 'выкл.' : D.settings.splashMode === 'daily' ? 'раз в сутки' : 'каждый запуск')],
   ['msg', 'Сообщения', 'send', () => 'Подпись, шаблоны' + (D.settings.embedCode ? ', код СКиП' : '')],
   ['lists', 'Списки и статусы', 'boards', () => 'Мои: ' + (D.settings.views.mine === 'kanban' ? 'канбан' : 'список') + ' · Указания: ' + (D.settings.views.orders === 'kanban' ? 'канбан' : 'список') + ' · блоки штаба'],
   ['safe', 'Защита', 'lock', () => pinSet() ? 'Код включён' + (!SEC.decoy && auxRec() ? ' · тревога' : '') : 'Код выключен'],
@@ -2292,7 +2295,7 @@ const SET_GROUPS = [
   ['help', 'Обучение', 'hq', () => 'Обзор возможностей' + (hasDemo() ? ' · образец добавлен' : ' и образец')]
 ];
 function settingsGroupHtml(g){
-  if (g === 'look') return '<div class="fld"><span class="lbl">Тема</span><div class="seg" id="st-th">'+[['', 'Как в системе'], ['light', 'Светлое'], ['dark', 'Тёмное'], ['emerald','Изумрудный штаб'],['graphite','Графит'],['holo','Голографический'],['hybrid','Изумрудный HUD'],['executive','Светлый командный']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+((D.settings.theme || '') === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div></div>'
+  if (g === 'look') return '<div class="fld"><span class="lbl">Тема</span><div class="seg" id="st-th">'+[['', 'Как в системе'], ['light', 'Светлое'], ['dark', 'Тёмное'], ['emerald','Изумрудный штаб'],['graphite','Графит'],['holo','Голографический'],['hybrid','Изумрудный HUD'],['executive','Светлый командный'],['command','Командный HUD · премиум'],['headquarters','Тёмный штаб · металл'],['tactical','Тактическая сетка'],['daylight','Дневной изумруд']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+((D.settings.theme || '') === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div></div>'
     + '<div class="set-sec"><h3>Кинематографическая заставка СКиП</h3><label class="switch"><input type="checkbox" id="st-splash"'+(D.settings.splash !== false ? ' checked' : '')+'><span>Показывать при запуске</span></label>'
     + '<div class="seg" id="st-spm">'+[['always', 'Каждый запуск'], ['daily', 'Раз в сутки']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+((D.settings.splashMode || 'always') === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div>'
     + '<label class="switch"><input type="checkbox" id="st-splash-sound"'+(D.settings.splashSound !== false ? ' checked' : '')+'><span>Звук кинематографической заставки</span></label>'
@@ -2477,6 +2480,20 @@ async function hashPin(pin, salt){
   }
   let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return 'f' + (h >>> 0).toString(16);
 }
+let INTRO_AUDIO_CONTEXT=null;
+let INTRO_SOUND_REQUESTED=true;
+function primeIntroAudio(){
+  try {
+    const AC=window.AudioContext || window.webkitAudioContext;
+    if(!AC)return false;
+    if(!INTRO_AUDIO_CONTEXT)INTRO_AUDIO_CONTEXT=new AC();
+    const ctx=INTRO_AUDIO_CONTEXT;
+    const buffer=ctx.createBuffer(1,1,ctx.sampleRate); const source=ctx.createBufferSource();
+    source.buffer=buffer;source.connect(ctx.destination);source.start(0);
+    ctx.resume().catch(()=>{});
+    return true;
+  }catch(e){return false;}
+}
 function pinPad(title, sub, onDone, opts){
   opts = opts || {};
   const ov = document.createElement('div'); ov.className = 'lock-screen';
@@ -2484,8 +2501,31 @@ function pinPad(title, sub, onDone, opts){
   ov.innerHTML = '<div class="lock-box"><img class="mark-img big" src="icon-192.png" alt="" width="64" height="64"><h2>'+esc(title)+'</h2><p class="lock-sub">'+esc(sub)+'</p><div class="pin-dots">'+'<i></i>'.repeat(digits)+'</div>'
     + '<div class="pad">'+[1,2,3,4,5,6,7,8,9].map(n => '<button type="button" data-n="'+n+'">'+n+'</button>').join('')
     + (opts.cancel ? '<button type="button" data-c class="pad-t">Отмена</button>' : (opts.forgot ? '<button type="button" data-f class="pad-t">Забыли?</button>' : '<span></span>'))
-    + '<button type="button" data-n="0">0</button><button type="button" data-b class="pad-t" aria-label="Стереть">⌫</button></div></div>';
+    + '<button type="button" data-n="0">0</button><button type="button" data-b class="pad-t" aria-label="Стереть">⌫</button></div>'
+    + (opts.showSound ? '<div class="pin-sound-box"><button type="button" class="pin-sound-button" data-sound><span class="pin-sound-dot"></span>🔊 <span class="pin-sound-label">Активировать звук заставки</span></button><p class="pin-sound-help">На iPhone и iPad звук иногда блокируется системой. Если заставка беззвучна, нажмите эту кнопку перед вводом PIN.</p><button type="button" data-sound-info class="pin-help-link">Почему требуется нажатие?</button></div>' : '')
+    + '</div>';
   document.body.appendChild(ov); document.body.classList.add('lock');
+  if(opts.showSound){
+    try{INTRO_SOUND_REQUESTED=localStorage.getItem('skipp_intro_audio_pref')!=='off';}catch(e){INTRO_SOUND_REQUESTED=true;}
+    const b=ov.querySelector('[data-sound]');
+    const update=armed=>{b.classList.toggle('armed',!!armed);b.querySelector('.pin-sound-label').textContent=armed?'Звук активирован ✓':'Принудительно включить звук';};
+    update(false);
+    b.addEventListener('click',()=>{
+      // This is an enable/prime action, never a toggle that silently disables sound.
+      INTRO_SOUND_REQUESTED=true;
+      try{localStorage.setItem('skipp_intro_audio_pref','on');}catch(e){}
+      const armed=primeIntroAudio();update(armed);
+      if(!armed){ov.querySelector('.pin-sound-help').textContent='Не удалось активировать звук. При появлении заставки нажмите кнопку включения звука ещё раз.';}
+    });
+    const info=()=>{
+      const help=ov.querySelector('.pin-sound-help');
+      help.textContent='iOS ограничивает запуск звука без касания. Включите звук здесь, а если система всё равно блокирует его, нажмите подсвеченную кнопку на заставке. Настройки доступны в разделе «Оформление».';
+      help.classList.add('pin-sound-important');
+      try{localStorage.setItem('skipp_sound_hint_seen','1');}catch(e){}
+    };
+    ov.querySelector('[data-sound-info]').addEventListener('click',info);
+    try{if(!localStorage.getItem('skipp_sound_hint_seen')){info();}}catch(e){}
+  }
   let v = '';
   const dots = $$('.pin-dots i', ov), subEl = $('.lock-sub', ov);
   const draw = () => dots.forEach((d, i) => d.classList.toggle('on', i < v.length));
@@ -2497,7 +2537,7 @@ function pinPad(title, sub, onDone, opts){
     reset(t, s){ busy = false; v = ''; draw(); $('h2', ov).textContent = t; subEl.textContent = s; },
     msg(s){ subEl.textContent = s; }
   };
-  const press = n => { if (busy || v.length >= digits) return; v += n; draw(); if (v.length === digits) { busy = true; const x = v; setTimeout(() => onDone(x, api), 120); } };
+  const press = n => { if (busy || v.length >= digits) return; v += n; draw(); if (v.length === digits) { if(opts.showSound && INTRO_SOUND_REQUESTED)primeIntroAudio(); busy = true; const x = v; setTimeout(() => onDone(x, api), 120); } };
   ov.addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.n != null) press(b.dataset.n);
@@ -2558,7 +2598,7 @@ async function openWithKey(key){
   if (obj && obj.enc !== 1) { const result = saveLocal(); if (result === false) return false; try { await result; } catch(e) { return false; } }
   return true;
 }
-function setupPin(){
+function setupPin(onCreated){
   const digits = auxRec() && auxRec().digits !== 6 ? 4 : 6;
   let first = null;
   pinPad('Новый код-пароль', 'Введите ' + digits + ' цифр', async (x, api) => {
@@ -2568,9 +2608,22 @@ function setupPin(){
     try {
       if (CRYPTO_OK) await enablePin(x);
       else { throw new Error('Для PIN необходимо защищённое соединение и Web Crypto'); }
-      localStorage.removeItem('skipp_pin_fail'); api.close(); toast(CRYPTO_OK ? 'Код-пароль включён, данные зашифрованы' : 'Код-пароль включён (шифрование недоступно в этом браузере)');
-    } catch (e) { api.close(); toast('Не удалось включить код-пароль'); }
-  }, {cancel:true, digits:digits});
+      localStorage.removeItem('skipp_pin_fail'); api.close(); toast('Код-пароль установлен, данные зашифрованы'); if (typeof onCreated === 'function') onCreated();
+    } catch (e) { console.error('Не удалось включить код-пароль', e); api.fail('Не удалось создать PIN. Проверьте защищённое соединение и хранилище, затем повторите.'); }
+  }, {cancel:!onCreated, digits:digits});
+}
+function firstRunPin(){
+  if (!CRYPTO_OK || !STORAGE_OK || STORAGE_READONLY) {
+    const root=document.createElement('div');root.className='lock-screen startup-security';
+    root.innerHTML='<div class="lock-box"><h2>Безопасный запуск недоступен</h2><p>Для создания шифрованного PIN требуется HTTPS и доступное локальное хранилище. Откройте СКиП на опубликованном GitHub Pages.</p><button class="btn" id="retry-startup">Повторить</button></div>';
+    document.body.append(root);document.body.classList.add('locked');
+    root.querySelector('button').addEventListener('click',()=>location.reload());return;
+  }
+  document.body.classList.add('locked');
+  setupPin(()=>{
+    SEC.key=null;SEC.locked=true;D=blank();render();
+    askPin(afterUnlock);
+  });
 }
 function askPin(then){
   const rec = pinRec();
@@ -2594,7 +2647,7 @@ function askPin(then){
     const n = getF() + 1; setF(n);
     if (n >= MAX) { api.fail('Превышено число попыток. Данные сохранены. Проверьте PIN или восстановите резервную копию.'); return; }
     api.fail(n >= 6 ? 'Неверный код. Осталось попыток: ' + (MAX - n) + '. Данные не удаляются' : 'Неверный код');
-  }, {digits:rec.digits === 6 ? 6 : 4, forgot: async api => {
+  }, {showSound:true, digits:rec.digits === 6 ? 6 : 4, forgot: async api => {
     api.close();
     const ok = await confirmDlg('Код восстановить нельзя. Можно сбросить приложение: будут удалены ВСЕ задачи и данные на этом устройстве. Если у вас есть выгруженный файл, данные можно будет загрузить из него.', 'Удалить всё и сбросить');
     if (ok) { try { await eraseAllLocalData(); location.reload(); } catch (e) { console.error(e); toast('Сброс не завершён. Данные могут сохраняться — повторите попытку после закрытия других вкладок.'); askPin(then); } }
@@ -2611,7 +2664,12 @@ async function lockNow(){
   render();
   askPin(afterUnlock);
 }
-function afterUnlock(){ document.body.classList.remove('locked'); autoArchive(); render(); startIntro(); }
+function afterUnlock(){
+  INTRO_DONE = false;
+  document.body.classList.remove('locked');
+  if (D.settings.splashSound !== false) INTRO_SOUND_REQUESTED = INTRO_SOUND_REQUESTED !== false;
+  autoArchive();render();startIntro();
+}
 
 /* ================= офлайн-генератор Excel (.xlsx) ================= */
 const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
@@ -2684,7 +2742,9 @@ document.addEventListener('pointerup', () => {
   if (LP.ready) { LP.ready = false; LP.fired = Date.now(); el.dispatchEvent(new CustomEvent('longshare', {bubbles:true})); }
 }, true);
 window.addEventListener('click', e => { if (LP.fired && Date.now() - LP.fired < 900) { LP.fired = 0; e.preventDefault(); e.stopPropagation(); } }, true);
-document.addEventListener('contextmenu', e => { if (e.target.closest('[data-lp]')) e.preventDefault(); });
+document.addEventListener('contextmenu', e => { if (e.target.closest('[data-lp]')) e.preventDefault(); }, true);
+document.addEventListener('selectstart',e=>{if(e.target.closest('[data-lp]'))e.preventDefault();},true);
+document.addEventListener('dragstart',e=>{if(e.target.closest('[data-lp]'))e.preventDefault();},true);
 document.addEventListener('longshare', e => {
   const b = e.target.closest('[data-a="copy-order"],[data-a="copy-remind"]'); if (!b) return;
   const t = D.tasks.find(x => x.id === b.dataset.id); if (!t) return;
@@ -2938,7 +2998,7 @@ function splashVideoFiles(portrait){
   const quality = D.settings.splashQuality || 'auto';
   const conn = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
   const slow = !!(conn && (conn.saveData || /(^|slow-)2g/.test(conn.effectiveType || '')));
-  const high = quality === '1080' || (quality !== '720' && !slow && navigator.onLine !== false);
+  const high = quality !== '720' && !(quality === 'auto' && slow);
   const base = portrait ? 'portrait' : 'landscape';
   return {src:'assets/skip-intro-'+base+'-'+(high ? '1080' : '720')+'.mp4',poster:'assets/skip-'+base+'-poster.jpg',finished:'assets/skip-hud-'+base+'.jpg'};
 }
@@ -2962,12 +3022,13 @@ function showSplash(then){
     + '<button type="button" class="ski-close">Пропустить '+ic('chevR',16)+'</button></div>';
   document.body.appendChild(ov);
   const video=$('.ski-video',ov),frame=$('.ski-frame',ov), btn=$('.ski-sound',ov);
-  let done=false, fallback=false, soundEnabled=false, videoEnded=false;
-  let radioContext=null, radioBuffer=null, radioSource=null, radioPending=null, radioStarted=false, radioPlaying=false;
+  let done=false, fallback=false, soundEnabled=false, videoEnded=false, triedLow=false;
+  let radioContext=INTRO_AUDIO_CONTEXT, radioBuffer=null, radioSource=null, radioPending=null, radioStarted=false, radioPlaying=false; INTRO_AUDIO_CONTEXT=null;
   const hasAudio = D.settings.splashSound !== false;
   const hasRadio = hasAudio && D.settings.splashRadio !== false;
   const soundLabel = hasRadio ? 'Включить звук и голос' : 'Включить звук';
-  btn.hidden = !hasAudio;
+  const wantAudio=hasAudio && INTRO_SOUND_REQUESTED !== false;
+  btn.hidden = !hasAudio; btn.classList.add('ski-highlight-sound');
   const stopRadio = () => {
     if(radioSource){ try {radioSource.onended=null;radioSource.stop();}catch(e){} radioSource=null; }
     radioPlaying=false;
@@ -3062,11 +3123,30 @@ function showSplash(then){
     // Preserve the last HUD frame until the slightly longer night greeting finishes.
     if(!radioPlaying)close();
   });
-  video.addEventListener('error',showFallback);
-  const loadTimeout=setTimeout(()=>{if(video.readyState===0)showFallback();},9000);
+  video.addEventListener('error',()=>{
+    if(!triedLow && /1080/.test(media.src)){
+      triedLow=true;video.pause();video.src=media.src.replace('1080','720');video.load();
+      video.muted=true;video.play().catch(showFallback);
+    }else showFallback();
+  });
+  const loadTimeout=setTimeout(()=>{if(video.readyState===0)showFallback();},15000);
   let durationTimeout=setTimeout(()=>{if(!done && !fallback)close();},13000);
   if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){showFallback();}
-  else {video.src=media.src;video.load();video.play().catch(()=>{showFallback();});}
+  else {
+    video.src=media.src;video.load();
+    video.muted=!wantAudio;
+    soundEnabled=wantAudio;
+    if(wantAudio)armRadio();
+    video.play().then(()=>{
+      if(!video.muted){btn.querySelector('span').textContent='Выключить звук';btn.classList.remove('ski-highlight-sound');}
+    }).catch(()=>{
+      // Safari/iOS rejects an unmuted autoplay even after PIN verification.
+      // Continue silently and offer a real user-gesture retry in the splash.
+      soundEnabled=false;video.muted=true;btn.hidden=false;btn.classList.add('ski-highlight-sound');
+      btn.querySelector('span').textContent='Нажмите, чтобы включить звук';
+      video.play().catch(showFallback);
+    });
+  }
 }
 
 /* ================= обучение ================= */
@@ -3152,8 +3232,9 @@ function removeDemo(){
 }
 let INTRO_DONE = false;
 function startIntro(){
+  if (!pinSet() || SEC.locked) return;
   if (INTRO_DONE) return; INTRO_DONE = true;
-  const tour = () => { let seen = false; try { seen = !!localStorage.getItem('skipp_tour'); } catch (e) {} if (!seen) openTour(); else setTimeout(backupReminder, 300); };
+  const tour = () => { try { if (!localStorage.getItem('skipp_splash_settings_tip')) { localStorage.setItem('skipp_splash_settings_tip','1');setTimeout(()=>toast('Настройки заставки и звука доступны в «Настройки → Оформление»'),500); } } catch(e) {} let seen = false; try { seen = !!localStorage.getItem('skipp_tour'); } catch (e) {} if (!seen) openTour(); else setTimeout(backupReminder, 300); };
   let shown = ''; try { shown = localStorage.getItem('skipp_splash_day') || ''; } catch (e) {}
   if (D.settings.splash !== false && (D.settings.splashMode !== 'daily' || shown !== today())) { try { localStorage.setItem('skipp_splash_day', today()); } catch (e) {} showSplash(tour); } else tour();
 }
@@ -3394,6 +3475,19 @@ async function handle(a, el){
     case 'j-filter': U.jFilter = el.dataset.v; render(); break;
     case 'export-journal': exportJournal(); break;
     case 'restore': commit(() => { const t = D.tasks.find(x => x.id === id); if (!t) return; t.archived = false; t.archivedAt = null; setOverall(t, firstT()); }); toast('Задача возвращена в работу'); break;
+    case 'tomorrow-task': {
+      const t=D.tasks.find(x=>x.id===id);if(!t||isDone(t))break;
+      if(commit(()=>{t.due=addDays(today(),1);t.updatedAt=Date.now();}))toast('Срок перенесён на завтра');
+      break;
+    }
+    case 'repeat-new':openTaskForm(null,{task:{repeat:'weekly',due:today()}});break;
+    case 'repeat-edit': {const t=D.tasks.find(x=>x.id===id);if(t)openTaskForm(t);break;}
+    case 'repeat-stop': {
+      const t=D.tasks.find(x=>x.id===id);if(!t)break;
+      if(await confirmDlg('Остановить повторение «'+t.title+'»? Существующие экземпляры сохранятся.','Остановить')){
+        commit(()=>{t.repeat='none';t.repeatDays=null;t.updatedAt=Date.now();});toast('Повторение остановлено');
+      }break;
+    }
     case 'del-task': commit(() => { const x = D.tasks.find(y => y.id === id); if (x) toTrash('task', x); }); toast('Перемещено в корзину'); break;
     case 'clear-archive': if (await confirmDlg('Переместить все задачи из архива в корзину?', 'Переместить')) commit(() => { D.tasks.filter(x => x.archived).forEach(x => toTrash('task', x)); }); break;
     case 'trash-restore': { let err = null; commit(() => { const x = D.trash.find(y => y.id === id); if (x) err = restoreTrash(x); }); toast(err || 'Восстановлено'); break; }
@@ -3426,6 +3520,7 @@ document.addEventListener('change', e => {
     const host=document.getElementById('ext-bulk-value-host');if(!host)return;
     const kind=e.target.value;
     if(kind==='due')host.innerHTML='<input type="date" id="ext-bulk-value" aria-label="Новый срок; пустое значение снимает срок">';
+    else if(kind==='delete'||kind==='tomorrow')host.innerHTML='<span class="hint">Дополнительных параметров нет</span>';
     else if(kind==='status')host.innerHTML='<select id="ext-bulk-value">'+tSt().map(x=>'<option value="'+esc(x.id)+'">'+esc(x.name)+'</option>').join('')+'</select>';
     else host.innerHTML='<select id="ext-bulk-value"><option value="high">Высокий</option><option value="mid">Обычный</option><option value="low">Низкий</option></select>';
     return;
@@ -3475,9 +3570,9 @@ async function startApp(){
   autoArchive();
   try { if (sessionStorage.getItem('skipp_wiped')) sessionStorage.removeItem('skipp_wiped'); } catch (e) {}
   if (pinSet()) { document.body.classList.add('locked'); askPin(afterUnlock); }
+  else if (!STORAGE_READONLY) { document.body.classList.add('locked'); firstRunPin(); }
   render();
   if (STORAGE_READONLY && !SEC.locked) setTimeout(() => offerRecovery(), 250);
-  if (!pinSet()) startIntro();
   if (navigator.storage && navigator.storage.persist) { try { navigator.storage.persist(); } catch (e) {} }
   const seenPreciseReminder=new Set();
   setInterval(() => {
