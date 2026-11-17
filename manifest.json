@@ -1,23 +1,24 @@
 {
- "name": "СКиПП — личный журнал задач",
- "short_name": "СКиПП",
- "start_url": "./",
- "scope": "./",
- "display": "standalone",
- "background_color": "#ECEEE8",
- "theme_color": "#2F5D46",
- "lang": "ru",
- "icons": [
-  {
-   "src": "icon-192.png",
-   "sizes": "192x192",
-   "type": "image/png"
-  },
-  {
-   "src": "icon-512.png",
-   "sizes": "512x512",
-   "type": "image/png",
-   "purpose": "any maskable"
-  }
- ]
+  "name": "СКиП — Система контроля и планирования",
+  "short_name": "СКиП",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#061811",
+  "theme_color": "#0B2823",
+  "lang": "ru",
+  "icons": [
+    {
+      "src": "icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ],
+  "description": "Офлайн-система контроля задач и планирования"
 }
