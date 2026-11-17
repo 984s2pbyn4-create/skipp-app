@@ -623,3 +623,14 @@ input[type="date"]::-webkit-calendar-picker-indicator,input[type="time"]::-webki
 /* Never hide the short side of the PIN pad in iPad windows. */
 
 
+
+/* v4.9.1: ненавязчивое состояние загрузки офлайн-файлов. */
+.skipp-offline-notice{position:fixed;z-index:210;top:calc(10px + env(safe-area-inset-top,0px));left:50%;transform:translateX(-50%);max-width:min(92vw,520px);padding:9px 13px;border-radius:12px;border:1px solid rgba(255,255,255,.2);background:#172b27;color:#f1f5ee;box-shadow:0 4px 18px rgba(0,0,0,.25);font-size:13px;line-height:1.35;text-align:center;pointer-events:none}
+.skipp-offline-notice.ready{background:#1e5138}
+.skipp-offline-notice.error{background:#80312b}
+.skipp-offline-notice[hidden]{display:none!important}
+
+/* 4.9.2: security overlays must win over splash and prevent HUD bleed-through. */
+body.locked .ski-splash,body.privacy .ski-splash{display:none!important}
+.lock-screen{z-index:320}
+.ski-fallback .ski-loading,.ski-still .ski-loading{opacity:0!important;visibility:hidden!important}

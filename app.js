@@ -1,4 +1,4 @@
-/* СКиП v4.8 — вход по PIN перед заставкой, радиозвук, адаптивность и управление задачами. */
+/* СКиП v4.9.2 Safety — на базе 4.9.1; локальные данные и PIN формата v2 совместимы. */
 (function(){
 'use strict';
 
@@ -106,12 +106,19 @@ const isSentStatus = id => /отправ|доведен/i.test(tStatus(id).name)
 const prName = id => (PRIORITIES.find(p => p.id === id) || PRIORITIES[1]).name;
 
 /* ================= хранилище на устройстве ================= */
+const SKIPP_VERSION='4.9.2';
 const KEY = 'skipp_offline_v2';
 const DASH_DEFAULT = ['tiles','od','bn','im','rm','statuses','load'];
 let STORAGE_OK = true;
 let STORAGE_READONLY = false;
 let LAST_RAW = null;
 let BASELINE_READY = false;
+// v4.9.2: primary IndexedDB record is the single source for all reads.
+let PRIMARY_BOOT_RECORD = null;
+let PRIMARY_PIN_RECORD = undefined;
+let MIRROR_REPAIR_REQUIRED = false;
+let LAST_COMMIT_RESULT = Promise.resolve(true);
+let COMMIT_ACTION_COUNTER = 0;
 let PENDING_WRITES = 0;
 let LAST_SAVE_ERROR = null;
 // The banner reports durability, not merely an optimistic UI change.
@@ -157,39 +164,55 @@ function checkExternalChange(){
 }
 // Writes are serialized. IndexedDB commits first; localStorage is a legacy mirror.
 // A failed mirror does not invalidate an already committed IndexedDB transaction.
-async function writeMain(value, pinMetadata, force=false){
+async function writeMain(value, pinMetadata, force=false, secureTransition=false){
   if (!force) checkExternalChange();
   const previous = LAST_RAW;
   if (PRIMARY_IDB_ENABLED) {
     const db = await recoveryDb();
     await new Promise((resolve,reject) => {
-      const tx = db.transaction('primary','readwrite');
+      const tx = db.transaction(secureTransition ? ['primary','snapshots'] : ['primary'],'readwrite');
       const store = tx.objectStore('primary');
       const req = store.get('current');
-      let conflict = null;
+      let conflict = null, committedPin = undefined;
       req.onsuccess = () => {
         const existing = req.result;
         if (!force && existing && existing.raw !== previous) { conflict = new Error('Данные IndexedDB изменены другой вкладкой'); tx.abort(); return; }
-        const pin = pinMetadata === undefined ? (existing ? existing.pin : localStorage.getItem(PIN_KEY)) : pinMetadata;
+        let oldPin=null;
+        try{oldPin=existing?existing.pin:localStorage.getItem(PIN_KEY);}catch(_){}
+        const pin=pinMetadata===undefined?oldPin:pinMetadata;
         store.put({id:'current',raw:value,pin:pin == null ? null : pin,at:Date.now()});
+        if (secureTransition) {
+          const snapshots=tx.objectStore('snapshots');
+          snapshots.clear();
+          // No plaintext snapshot can survive the PIN transition.
+          snapshots.put({id:'previous',raw:value,at:Date.now()});
+        }
+        committedPin = pin == null ? null : pin;
       };
       req.onerror = () => { conflict = req.error; tx.abort(); };
-      tx.oncomplete = resolve;
+      tx.oncomplete = () => { PRIMARY_PIN_RECORD=committedPin;resolve(); };
       tx.onabort = () => reject(conflict || tx.error || new Error('Не удалось записать IndexedDB'));
       tx.onerror = () => {};
     });
   }
   // On a crash between IDB commit and this mirror, startup repairs the mirror.
   LAST_RAW = value; BASELINE_READY = true;
-  try { storageWrite(KEY,value); }
+  if(PRIMARY_IDB_ENABLED) PRIMARY_BOOT_RECORD={id:'current',raw:value,pin:PRIMARY_PIN_RECORD,at:Date.now()};
+  try { storageWrite(KEY,value); MIRROR_REPAIR_REQUIRED=false; }
   catch (err) {
     if (!PRIMARY_IDB_ENABLED) throw err;
-    // Main transaction is already committed; a legacy mirror failure is not data loss.
+    MIRROR_REPAIR_REQUIRED=true;
+    if(secureTransition) {
+      // Verified primary and recovery snapshot contain ciphertext. Keeping a stale
+      // plaintext mirror offers no recovery benefit and breaks PIN confidentiality.
+      try{localStorage.removeItem(KEY);}catch(_){}
+    }
+    // A broken mirror is NOT an excuse to load stale bytes on the next unlock.
     console.warn('IndexedDB сохранена; зеркало localStorage недоступно',err);
     saveNotice('Сохранено в IndexedDB; зеркало недоступно', 'done');
   }
   notifyOtherTabs(value);
-  if (!force && previous && previous !== value) {
+  if (!force && !secureTransition && previous && previous !== value) {
     let transition = false;
     try { transition = JSON.parse(value).enc === 1 && JSON.parse(previous).enc !== 1; } catch(err) {}
     if (!transition) recoveryQueue(previous);
@@ -214,30 +237,41 @@ function primaryPutInitial(raw,pin){
   }));
 }
 async function initializePrimary(){
-  // No legacy data is deleted. IDB unavailability leaves the old storage usable.
+  // Never prefer the mirror when the authoritative IndexedDB record is present.
   let current;
-  try { current = await primaryGet(); PRIMARY_IDB_ENABLED = true; }
-  catch(err) { console.warn('IndexedDB недоступна, сохранение через localStorage',err); PRIMARY_IDB_READY=true; return; }
+  try { current = await primaryGet(); PRIMARY_IDB_ENABLED=true; }
+  catch(err) { console.warn('IndexedDB недоступна; резервный localStorage-режим',err); PRIMARY_IDB_READY=true; return; }
   try {
-    const legacy = localStorage.getItem(KEY);
-    if (!current) {
-      if (legacy) await primaryPutInitial(legacy,localStorage.getItem(PIN_KEY));
-    } else if (legacy !== current.raw) {
-      // IDB is authoritative after migration. Keep the conflicting legacy bytes
-      // separately before repairing the mirror; never silently discard them.
-      if (legacy && legacy !== current.raw) {
-        const existingConflict = localStorage.getItem('skipp_legacy_conflict_v14');
-        if (!existingConflict) storageWrite('skipp_legacy_conflict_v14',legacy);
+    let legacy=null;
+    try { legacy=localStorage.getItem(KEY); } catch(err) { MIRROR_REPAIR_REQUIRED=true; }
+    if (!current && legacy) { await primaryPutInitial(legacy, localStorage.getItem(PIN_KEY)); current=await primaryGet(); }
+    PRIMARY_BOOT_RECORD=current;
+    PRIMARY_PIN_RECORD=current ? current.pin : undefined;
+    if (current && legacy!==current.raw) {
+      // Do not duplicate plaintext from a PIN-protected database into another key.
+      // A stale legacy mirror is preserved until a protected recovery path can secure it.
+      if(legacy && legacy!==current.raw){
+        let encrypted=false;
+        try { encrypted=JSON.parse(current.raw)?.enc===1; } catch(_){}
+        if(!encrypted) {
+          try { if(!localStorage.getItem('skipp_legacy_conflict_v14')) storageWrite('skipp_legacy_conflict_v14',legacy); }
+          catch(err){ console.warn('Не удалось сохранить конфликтующее зеркало',err); }
+        }
       }
-      storageWrite(KEY,current.raw);
+      let needsProtection=false;
+      try{needsProtection=JSON.parse(current.raw)?.enc===1 && legacy && JSON.parse(legacy)?.enc!==1;}catch(_){}
+      if(needsProtection){MIRROR_REPAIR_REQUIRED=true;}
+      else try { storageWrite(KEY,current.raw); } catch(err){MIRROR_REPAIR_REQUIRED=true;}
     }
-    if (current) {
-      const pin = localStorage.getItem(PIN_KEY);
-      if (current.pin && current.pin !== pin) storageWrite(PIN_KEY,current.pin);
-      else if (current.pin === null && pin) localStorage.removeItem(PIN_KEY);
+    if(current){
+      try {
+        const pin=localStorage.getItem(PIN_KEY);
+        if(current.pin && pin!==current.pin) storageWrite(PIN_KEY,current.pin);
+        else if(current.pin===null && pin) localStorage.removeItem(PIN_KEY);
+      } catch(err){console.warn('Зеркало PIN недоступно; метаданные IndexedDB сохранены',err);}
     }
   } catch(err) { setReadOnly(err); }
-  PRIMARY_IDB_READY = true;
+  PRIMARY_IDB_READY=true;
 }
 /* IndexedDB: independent recovery snapshots. The legacy localStorage key remains
    the authoritative format for backward compatibility; never delete it on migration. */
@@ -323,8 +357,8 @@ async function offerRecovery(){
   let snap;
   try { snap = await recoveryGet(); } catch (err) { return; }
   if (!snap || !snap.raw) return;
-  let primary = null;
-  try { primary = localStorage.getItem(KEY); } catch (err) { return; }
+  let primary=null;
+  try { primary=PRIMARY_IDB_ENABLED ? (await primaryGet())?.raw : localStorage.getItem(KEY); }catch(err){return;}
   let broken = STORAGE_READONLY;
   if (!broken && primary) { try { const obj=JSON.parse(primary); if (!obj || (obj.enc !== 1 && !Array.isArray(obj.tasks))) broken=true; } catch(err){broken=true;} }
   if (!broken) return;
@@ -334,8 +368,12 @@ async function offerRecovery(){
     if (parsed.enc !== 1) {
       if (pinRec()) throw new Error('Нельзя восстановить открытую копию поверх PIN-защищённой базы');
       validateData(parsed);
-    } else if (!pinRec()) throw new Error('Нет PIN для зашифрованной копии');
+    } else {
+      if(!pinRec()||!SEC.key)throw new Error('Для зашифрованного снимка требуется разблокированный PIN');
+      validateData(JSON.parse(await decStr(SEC.key,parsed)));
+    }
     if (PRIMARY_IDB_ENABLED) { const live = await primaryGet(); if (live && live.raw && live.raw !== primary) throw new Error('Основная база изменилась; восстановление отменено'); }
+    if(primary)await recoveryPutNamed('pre-recovery',primary);
     await writeMain(snap.raw, undefined, true);
     location.reload();
   } catch(err){ toast('Не удалось восстановить резервный снимок'); console.error(err); }
@@ -361,8 +399,13 @@ function validateImportBounds(d){
     if (Array.isArray(d[name]) && d[name].length>limit) throw new Error('Слишком много записей: '+name);
   }
   walk(d,0);
+  const taskIds=new Set();
   for(const t of d.tasks){
     if (typeof t.id!=='string' || !t.id || t.id.length>200) throw new Error('Некорректный идентификатор задачи');
+    if(taskIds.has(t.id)) throw new Error('Повторяющийся идентификатор задачи');taskIds.add(t.id);
+    if(typeof t.title!=='string')throw new Error('Название задачи должно быть строкой');
+    for(const k of ['due','dueTime','remindAt','status','priority','repeat','note'])if(t[k]!=null && typeof t[k]!=='string')throw new Error('Некорректное поле задачи: '+k);
+    if(t.due && !/^\d{4}-\d{2}-\d{2}$/.test(t.due))throw new Error('Некорректная дата срока');
     if (t.assignees && t.assignees.length>500) throw new Error('Слишком много исполнителей');
     if (t.checklist && t.checklist.length>1000) throw new Error('Слишком длинный чек-лист');
   }
@@ -373,6 +416,14 @@ function validateData(d){
   for (const k of VALID_COLLECTIONS) if (Object.prototype.hasOwnProperty.call(d,k) && !Array.isArray(d[k])) throw new Error('Неверный формат: ' + k);
   if (d.settings != null && (typeof d.settings !== 'object' || Array.isArray(d.settings))) throw new Error('Неверные настройки');
   for (const k of VALID_COLLECTIONS) if (Array.isArray(d[k]) && d[k].some(x => !x || typeof x !== 'object' || Array.isArray(x))) throw new Error('Некорректные записи: ' + k);
+  // IDs are always escaped in generated attributes; imports additionally reject dangerous syntax.
+  for (const k of VALID_COLLECTIONS) {
+    const ids=new Set();
+    for(const x of d[k]||[]){
+      if(x.id!=null){if(typeof x.id!=='string' || x.id.length>200 || !x.id)throw new Error('Неверный ID: '+k);
+        if(ids.has(x.id))throw new Error('Дублирующийся ID: '+k);ids.add(x.id);}
+    }
+  }
   for (const t of d.tasks) {
     if (t.assignees != null && (!Array.isArray(t.assignees) || t.assignees.some(a => !a || typeof a !== 'object' || Array.isArray(a)))) throw new Error('Некорректные исполнители задачи');
     if (t.checklist != null && (!Array.isArray(t.checklist) || t.checklist.some(i => !i || typeof i !== 'object' || Array.isArray(i)))) throw new Error('Некорректный список проверки');
@@ -381,6 +432,10 @@ function validateData(d){
   for (const t of d.trash || []) if (t.cards != null && !Array.isArray(t.cards)) throw new Error('Некорректная корзина');
   if (d.settings && d.settings.dash != null && (typeof d.settings.dash !== 'object' || Array.isArray(d.settings.dash))) throw new Error('Некорректная панель');
   if (d.settings && ['taskStatuses','asgStatuses'].some(k => d.settings[k] != null && !Array.isArray(d.settings[k]))) throw new Error('Некорректные статусы');
+  for(const kind of ['taskStatuses','asgStatuses'])for(const status of d.settings?.[kind]||[]){
+    if(!status||typeof status!=='object'||typeof status.name!=='string'||typeof status.id!=='string'||
+       typeof status.color!=='string'||!/^#[0-9a-fA-F]{6}$/.test(status.color))throw new Error('Неверный цвет или статус');
+  }
   return validateImportBounds(d);
 }
 function setReadOnly(reason){ STORAGE_READONLY = true; console.error(reason); setTimeout(() => toast('Данные не загружены или не сохранены. Работа только для чтения; восстановите резервную копию.'), 100); }
@@ -419,12 +474,13 @@ async function encStr(key, str){
   return {iv:b64e(iv), ct:b64e(ct)};
 }
 async function decStr(key, env){ return new TextDecoder().decode(await crypto.subtle.decrypt({name:'AES-GCM', iv:b64d(env.iv)}, key, b64d(env.ct))); }
-function pinRec(){ try { return JSON.parse(localStorage.getItem('skipp_pin') || 'null'); } catch (e) { return null; } }
+function pinRec(){ try { return JSON.parse((PRIMARY_IDB_ENABLED && PRIMARY_PIN_RECORD !== undefined ? PRIMARY_PIN_RECORD : localStorage.getItem('skipp_pin')) || 'null'); } catch (e) { return null; } }
 function pinRecV2(){ const r = pinRec(); return r && r.v === 2 ? r : null; }
 function load(){
-  try { const t = '__t'; localStorage.setItem(t, '1'); localStorage.removeItem(t); } catch (e) { STORAGE_OK = false; }
-  let raw = null;
-  try { raw = localStorage.getItem(KEY); LAST_RAW = raw; BASELINE_READY = true; } catch (e) { setReadOnly(new Error('Не удалось прочитать локальное хранилище')); return; }
+  try { const t = '__t'; localStorage.setItem(t, '1'); localStorage.removeItem(t); } catch (e) { if(!PRIMARY_IDB_ENABLED) STORAGE_OK=false; }
+  let raw=null;
+  try { raw=PRIMARY_IDB_ENABLED ? (PRIMARY_BOOT_RECORD?.raw||null) : localStorage.getItem(KEY); LAST_RAW=raw; BASELINE_READY=true; }
+  catch(e){setReadOnly(new Error('Не удалось прочитать основную базу'));return;}
   if (raw) {
     let obj = null; try { obj = JSON.parse(raw); } catch (e) { console.error(e); }
     if (obj && obj.enc === 1) { D = blank(); D.savedAt = 0; SEC.locked = true; if (!pinRec()) setReadOnly(new Error('Зашифрованная база без записи PIN. Требуется восстановление доступа.')); return; }
@@ -457,6 +513,7 @@ function migrate(){
 }
 function saveLocal(){
   if (!STORAGE_OK || STORAGE_READONLY || SEC.locked) { toast('Сохранение недоступно'); return false; }
+  try { validateData(D); } catch(err){ console.error('Отказ в сохранении некорректной базы',err); toast('Сохранение остановлено: некорректный формат данных'); return false; }
   const str=JSON.stringify(D);
   if (pinRecV2() && !SEC.key) return false;
   const key=SEC.key, dest=SEC.decoy?'skipp_dx':KEY;
@@ -501,7 +558,9 @@ function scheduleSetting(key, value) {
 function flushSettings() {
   if (!SETTING_INPUTS.size) return;
   if (PENDING_WRITES) { SETTING_TIMER = setTimeout(flushSettings, 180); return; }
-  if (STORAGE_READONLY || !STORAGE_OK || SEC.locked || !PRIMARY_IDB_READY) { SETTING_INPUTS.clear(); toast('Настройки не сохранены'); return; }
+  if (STORAGE_READONLY || !STORAGE_OK || SEC.locked || !PRIMARY_IDB_READY) {
+    toast('Настройки не сохранены. Не закрывайте приложение до аварийной выгрузки.');return;
+  }
   const changes = Array.from(SETTING_INPUTS);
   if (commit(() => { for (const [key, value] of changes) { if (key.startsWith('tpl.')) D.settings.tpl[key.slice(4)] = value; else D.settings[key] = value; } })) {
     for (const [key, value] of changes) if (SETTING_INPUTS.get(key) === value) SETTING_INPUTS.delete(key);
@@ -509,7 +568,14 @@ function flushSettings() {
   if (SETTING_INPUTS.size) SETTING_TIMER = setTimeout(flushSettings, 500);
 }
 const HIST = {undo:[], redo:[]};
+function trimHistory(){
+  // iPad memory budget: retain recent changes, not 40 full multi-megabyte databases.
+  while(HIST.undo.length>12 || HIST.undo.reduce((n,x)=>n+x.length,0)>5_000_000)HIST.undo.shift();
+  while(HIST.redo.length>12 || HIST.redo.reduce((n,x)=>n+x.length,0)>5_000_000)HIST.redo.shift();
+}
 function commit(fn){
+  COMMIT_ACTION_COUNTER++;
+  LAST_COMMIT_RESULT=Promise.resolve(false);
   SEARCH_TEXT_CACHE = new WeakMap();
   URGENCY_KEY_CACHE = new WeakMap();
   // A second edit must not race an unfinished durable transaction.
@@ -520,14 +586,15 @@ function commit(fn){
   try { fn(); autoArchive(true); } catch(e) { D = JSON.parse(before); toast('Не удалось выполнить действие'); console.error(e); render(); return false; }
   const result = save();
   if (result === false) { D = JSON.parse(before); render(); return false; }
-  HIST.undo.push(before); if (HIST.undo.length > 40) HIST.undo.shift();
+  HIST.undo.push(before); trimHistory();
   HIST.redo.length = 0;
+  LAST_COMMIT_RESULT=Promise.resolve(result).then(()=>true,()=>false);
   if (result && typeof result.then === 'function') result.catch(() => {
     // The failed edit is not durable; restore the last known in-memory state.
     // Storage remains read-only until the user recovers/reloads.
-    D = JSON.parse(before);
+    if(!SEC.locked){D = JSON.parse(before);render();}
     HIST.undo.pop(); HIST.redo.length = 0;
-    render(); saveNotice('Изменение отменено: ошибка сохранения', 'error');
+    saveNotice('Изменение отменено: ошибка сохранения', 'error');
   });
   render(); return true; // true means accepted for persistence, NOT persisted yet
 }
@@ -655,13 +722,22 @@ function restoreTrash(x){
   return null;
 }
 function autoArchive(skipSave){
+  if(!skipSave){
+    if(STORAGE_READONLY || SEC.locked || PENDING_WRITES || !PRIMARY_IDB_READY)return;
+    const td=today(); const hasToday=tSt().some(st=>st.id==='today'&&!st.done),f=firstT();
+    const needed=D.tasks.some(t=>(!t.archived&&isDone(t)&&t.completedAt&&ymd(new Date(t.completedAt))<td)||
+      (hasToday&&f!=='today'&&!t.archived&&!isDone(t)&&t.due&&t.due<=td&&t.status===f));
+    if(!needed)return;
+    // The mutation will run inside commit, which rolls back on durable failure.
+    return commit(()=>autoArchive(true));
+  }
   const td = today(); let n = 0;
   const hasToday = tSt().some(s => s.id === 'today' && !s.done), f = firstT();
   D.tasks.forEach(t => {
     if (!t.archived && isDone(t) && t.completedAt && ymd(new Date(t.completedAt)) < td) { t.archived = true; t.archivedAt = Date.now(); n++; }
     else if (hasToday && f !== 'today' && !t.archived && !isDone(t) && t.due && t.due <= td && t.status === f) { t.status = 'today'; t.updatedAt = Date.now(); n++; }
   });
-  if (n && !skipSave && !STORAGE_READONLY && !SEC.locked) save();
+  return n;
 }
 function knownNames(){
   const set = new Map();
@@ -813,8 +889,29 @@ function foot(o){
 function bindFoot(sh, o){
   sh.addEventListener('click', async e => {
     const b = e.target.closest('[data-f]'); if (!b) return;
-    if (b.dataset.f === 'save') { if (o.onSave() !== false) closeSheet(); }
-    else if (b.dataset.f === 'del') { if (o.soft || await confirmDlg(o.delText || 'Удалить безвозвратно?')) { o.onDelete(); closeSheet(); if (o.soft) toast('Перемещено в корзину'); } }
+    if (b.dataset.f === 'save') {
+      if(b.disabled)return;
+      b.disabled=true;
+      const seq=COMMIT_ACTION_COUNTER;
+      try {
+        const response=await o.onSave();
+        if(response===false)return;
+        if(COMMIT_ACTION_COUNTER!==seq && !(await LAST_COMMIT_RESULT))return;
+        if(document.body.contains(sh))closeSheet();
+      }catch(err){console.error(err);toast('Не удалось сохранить. Форма оставлена открытой.');}
+      finally{if(document.body.contains(sh))b.disabled=false;}
+    }
+    else if (b.dataset.f === 'del') {
+      if(b.disabled)return;
+      if(o.soft || await confirmDlg(o.delText || 'Удалить безвозвратно?')) {
+        b.disabled=true;const seq=COMMIT_ACTION_COUNTER;
+        try{const response=await o.onDelete();if(response===false)return;
+          if(COMMIT_ACTION_COUNTER!==seq && !(await LAST_COMMIT_RESULT))return;
+          if(document.body.contains(sh))closeSheet();if(o.soft)toast('Перемещено в корзину');
+        }catch(err){console.error(err);toast('Удаление не сохранено');}
+        finally{if(document.body.contains(sh))b.disabled=false;}
+      }
+    }
   });
 }
 
@@ -843,7 +940,7 @@ function topHtml(){
 }
 function openMore(){
   const sh = openSheet(head('Разделы') + '<div class="more-grid">'
-    + SECTIONS.filter(s => !TABBAR.includes(s.id)).map(s => '<button type="button" data-t="'+s.id+'" class="'+(U.tab === s.id ? 'on' : '')+'">'+ic(s.icon, 24)+s.title+'</button>').join('')
+    + SECTIONS.filter(s => !TABBAR.includes(s.id)).map(s => '<button type="button" data-t="'+esc(s.id)+'" class="'+(U.tab === s.id ? 'on' : '')+'">'+ic(s.icon, 24)+s.title+'</button>').join('')
     + '<button type="button" data-t="settings">'+ic('gear', 24)+'Настройки</button></div>', {small:true});
   sh.addEventListener('click', e => {
     const b = e.target.closest('[data-t]'); if (!b) return;
@@ -868,13 +965,13 @@ function statusPill(id, ai, s, isStatic){
   const st = ai != null ? aStatus(s) : tStatus(s);
   const lbl = ai != null ? 'Статус исполнителя' : 'Мой статус';
   if (isStatic) return '<span class="pill" style="--c:'+st.color+'" title="'+lbl+'"><span class="dot"></span>'+esc(st.name)+'</span>';
-  return '<button type="button" class="pill" style="--c:'+st.color+'" data-a="st-menu" data-id="'+id+'"'+(ai != null ? ' data-ai="'+ai+'"' : '')+' title="'+lbl+'" aria-label="'+lbl+': '+esc(st.name)+'. Сменить"><span class="dot"></span>'+esc(st.name)+'<span class="chev">'+ic('chevD', 12)+'</span></button>';
+  return '<button type="button" class="pill" style="--c:'+st.color+'" data-a="st-menu" data-id="'+esc(id)+'"'+(ai != null ? ' data-ai="'+ai+'"' : '')+' title="'+lbl+'" aria-label="'+lbl+': '+esc(st.name)+'. Сменить"><span class="dot"></span>'+esc(st.name)+'<span class="chev">'+ic('chevD', 12)+'</span></button>';
 }
 function taskCard(t, o){
   o = o || {};
   const cl = t.checklist || [], cd = cl.filter(i => i.done).length;
   const od = isOverdue(t), soon = isSoon(t), st = !!(o.archive), clOpen = !!U.clOpen[t.id];
-  let h = '<article class="card'+(t.priority === 'high' ? ' pr-high' : '')+(isDone(t) ? ' done' : '')+'" data-open="task" data-id="'+t.id+'"'+(!st ? ' data-drag="task"' : '')+'>'
+  let h = '<article class="card'+(t.priority === 'high' ? ' pr-high' : '')+(isDone(t) ? ' done' : '')+'" data-open="task" data-id="'+esc(t.id)+'"'+(!st ? ' data-drag="task"' : '')+'>'
     + '<div class="t-head"><div class="t-title">'+esc(t.title)+'</div></div>'
     + (t.note ? '<div class="t-note">'+esc(t.note)+'</div>' : '')
     + '<div class="meta-row">'
@@ -882,30 +979,36 @@ function taskCard(t, o){
     + (t.priority === 'high' ? '<span class="meta pr">'+ic('flag', 14)+'Высокий</span>' : '')
     + (t.repeat && t.repeat !== 'none' ? '<span class="meta" title="Повторяется">'+ic('repeat', 14)+'</span>' : '')
     + (remindActive(t) ? '<span class="meta" title="Сработало напоминание">'+ic('bell', 14)+'</span>' : '')
-    + (cl.length ? '<button type="button" class="cl-tg'+(clOpen ? ' on' : '')+'" data-a="cl-toggle" data-id="'+t.id+'" aria-expanded="'+clOpen+'" aria-label="Чек-лист: выполнено '+cd+' из '+cl.length+'">'+ic('check', 14)+cd+'/'+cl.length+'<span class="chev">'+ic('chevD', 14)+'</span></button>' : '')
+    + (cl.length ? '<button type="button" class="cl-tg'+(clOpen ? ' on' : '')+'" data-a="cl-toggle" data-id="'+esc(t.id)+'" aria-expanded="'+clOpen+'" aria-label="Чек-лист: выполнено '+cd+' из '+cl.length+'">'+ic('check', 14)+cd+'/'+cl.length+'<span class="chev">'+ic('chevD', 14)+'</span></button>' : '')
     + '<span class="sp"></span>' + (o.hideMine ? '' : statusPill(t.id, null, t.status, st))
     + '</div>';
-  if (cl.length && clOpen) h += '<div class="cl-card">' + cl.map((i, ix) => '<button type="button" class="cl-it'+(i.done ? ' on' : '')+'" data-a="cl-item" data-id="'+t.id+'" data-ix="'+ix+'"'+(st ? ' disabled' : '')+' aria-pressed="'+!!i.done+'"><span class="box">'+(i.done ? ic('check', 14) : '')+'</span><span>'+esc(i.text)+'</span></button>').join('') + '</div>';
+  if (cl.length && clOpen) h += '<div class="cl-card">' + cl.map((i, ix) => '<button type="button" class="cl-it'+(i.done ? ' on' : '')+'" data-a="cl-item" data-id="'+esc(t.id)+'" data-ix="'+ix+'"'+(st ? ' disabled' : '')+' aria-pressed="'+!!i.done+'"><span class="box">'+(i.done ? ic('check', 14) : '')+'</span><span>'+esc(i.text)+'</span></button>').join('') + '</div>';
   if (hasAsg(t)) {
     const n = t.assignees.length, rep = t.assignees.filter(a => aDone(a.status)).length, odA = t.assignees.some(a => asgOverdue(t, a));
     const ao = (U.asgOpen || {})[t.id], open = n === 1 || (ao != null ? ao : odA);
     const rows = t.assignees.map((a, i) => '<div class="asg-row'+(asgOverdue(t, a) ? ' bad' : '')+'"><span class="nm">'+esc(a.name)+'</span>'+statusPill(t.id, i, a.status, st)+'</div>').join('');
     const sumTxt = rep === n ? (isDone(t) ? 'Все доложили' : 'Все доложили — можно обобщать') : 'Доложили ' + rep + ' из ' + n;
     h += '<div class="asg">' + (n > 1
-      ? '<button type="button" class="asg-sum'+(rep === n ? ' ok' : '')+(open ? ' on' : '')+'" data-a="asg-toggle" data-id="'+t.id+'" aria-expanded="'+open+'">'+ic(rep === n ? 'check' : 'me', 14)+'<span>'+sumTxt+'</span>'+(odA ? '<span class="meta bad">просрочка</span>' : '')+'<span class="chev">'+ic('chevD', 14)+'</span></button>'
+      ? '<button type="button" class="asg-sum'+(rep === n ? ' ok' : '')+(open ? ' on' : '')+'" data-a="asg-toggle" data-id="'+esc(t.id)+'" aria-expanded="'+open+'">'+ic(rep === n ? 'check' : 'me', 14)+'<span>'+sumTxt+'</span>'+(odA ? '<span class="meta bad">просрочка</span>' : '')+'<span class="chev">'+ic('chevD', 14)+'</span></button>'
       : (rep === n && !isDone(t) ? '<div class="all-rep">'+ic('check', 14)+'Исполнитель доложил — можно обобщать</div>' : ''))
       + (open ? rows : '') + '</div>';
   }
-  if (hasAsg(t) && !st && !o.compact) h += '<div class="card-acts"><button type="button" class="btn sm" data-a="copy-order" data-lp data-id="'+t.id+'" title="Долгое нажатие — Поделиться">'+ic('send', 16)+'Поставить задачу</button>'
-    + '<button type="button" class="btn sm" data-a="copy-remind" data-lp data-id="'+t.id+'" title="Долгое нажатие — Поделиться"'+(isDone(t) || allReported(t) ? ' disabled' : '')+'>'+ic('bell', 16)+'Напомнить</button></div>';
-  if (!st && !o.compact && !isDone(t)) h += '<div class="card-acts"><button type="button" class="btn sm" data-a="tomorrow-task" data-id="'+t.id+'">'+ic('cal',16)+'Перенести на завтра</button></div>';
-  if (st) h += '<div class="card-acts"><button type="button" class="btn sm" data-a="restore" data-id="'+t.id+'">'+ic('restore', 16)+'Вернуть в работу</button><button type="button" class="btn sm danger-o" data-a="del-task" data-id="'+t.id+'" aria-label="Удалить">'+ic('trash', 16)+'</button></div>';
+  if (hasAsg(t) && !st && !o.compact) h += '<div class="card-acts"><button type="button" class="btn sm" data-a="copy-order" data-lp data-id="'+esc(t.id)+'" title="Долгое нажатие — Поделиться">'+ic('send', 16)+'Поставить задачу</button>'
+    + '<button type="button" class="btn sm" data-a="copy-remind" data-lp data-id="'+esc(t.id)+'" title="Долгое нажатие — Поделиться"'+(isDone(t) || allReported(t) ? ' disabled' : '')+'>'+ic('bell', 16)+'Напомнить</button></div>';
+  if (!st && !o.compact && !isDone(t)) h += '<div class="card-acts"><button type="button" class="btn sm" data-a="tomorrow-task" data-id="'+esc(t.id)+'">'+ic('cal',16)+'Перенести на завтра</button></div>';
+  if (st) h += '<div class="card-acts"><button type="button" class="btn sm" data-a="restore" data-id="'+esc(t.id)+'">'+ic('restore', 16)+'Вернуть в работу</button><button type="button" class="btn sm danger-o" data-a="del-task" data-id="'+esc(t.id)+'" aria-label="Удалить">'+ic('trash', 16)+'</button></div>';
   return h + '</article>';
 }
 function toolsRow(key){ return '<div class="tools"><button type="button" class="btn sm ghost-b" data-a="paste-task">'+ic('clip', 18)+'Вставить задачу</button><span class="sp"></span>'+viewToggle(key)+'</div>'; }
 function viewToggle(key){
   const v = D.settings.views[key] || 'list';
-  return '<div class="seg vt" role="group" aria-label="Вид"><button type="button" data-a="set-view" data-key="'+key+'" data-v="list" class="'+(v === 'list' ? 'on' : '')+'" aria-label="Списком" title="Списком">'+ic('list', 16)+'</button><button type="button" data-a="set-view" data-key="'+key+'" data-v="kanban" class="'+(v === 'kanban' ? 'on' : '')+'" aria-label="Канбан" title="Канбан">'+ic('boards', 16)+'</button></div>';
+  return '<div class="seg vt" role="group" aria-label="Вид"><button type="button" data-a="set-view" data-key="'+esc(key)+'" data-v="list" class="'+(v === 'list' ? 'on' : '')+'" aria-label="Списком" title="Списком">'+ic('list', 16)+'</button><button type="button" data-a="set-view" data-key="'+esc(key)+'" data-v="kanban" class="'+(v === 'kanban' ? 'on' : '')+'" aria-label="Канбан" title="Канбан">'+ic('boards', 16)+'</button></div>';
+}
+const TASK_BATCH=80;
+const TASK_SHOWN=new Map();
+function currentTaskLimit(key){return TASK_SHOWN.get(key)||TASK_BATCH;}
+function moreTaskButton(key,total,shown){
+  return shown<total ? '<button type="button" class="btn sm board-more" data-a="task-more" data-batch-key="'+esc(key)+'">Показать ещё '+Math.min(TASK_BATCH,total-shown)+' · '+shown+' из '+total+'</button>' : '';
 }
 function kanbanHtml(list, key){
   const cols = tSt();
@@ -918,8 +1021,9 @@ function kanbanHtml(list, key){
   }
   return '<div class="board-scroll" data-key="k-'+key+'"><div class="board">' + cols.map(s => {
     const items = buckets.get(s.id).sort((a, b) => (a.order || 0) - (b.order || 0));
-    return '<section class="col" data-drop="task" data-col="'+s.id+'" data-kind="'+key+'"><header class="col-h"><span class="dot" style="--c:'+s.color+'"></span><h3>'+esc(s.name)+'</h3><span class="n">'+items.length+'</span></header>'
-      + '<div class="cards">' + (items.map(t => taskCard(t, {drag:true})).join('') || '<div class="empty-col">Пусто</div>') + '</div></section>';
+    const batchKey='kanban:'+esc(key)+':'+s.id,shown=Math.min(items.length,currentTaskLimit(batchKey));
+    return '<section class="col" data-drop="task" data-col="'+esc(s.id)+'" data-kind="'+esc(key)+'"><header class="col-h"><span class="dot" style="--c:'+s.color+'"></span><h3>'+esc(s.name)+'</h3><span class="n">'+items.length+'</span></header>'
+      + '<div class="cards">' + (items.slice(0,shown).map(t => taskCard(t, {drag:true})).join('') || '<div class="empty-col">Пусто</div>') + '</div>' + moreTaskButton(batchKey,items.length,shown) + '</section>';
   }).join('') + '</div></div><p class="hint">Чтобы сменить статус, нажмите плашку статуса на карточке или перетащите её в другой столбец (на телефоне — удерживайте; у края экрана столбцы прокручиваются сами).</p>';
 }
 function groupTasks(list){
@@ -940,12 +1044,13 @@ function groupsHtml(g, key){
   let h = '';
   GROUPS.forEach(x => {
     const l = g[x[0]]; if (!l.length) return;
-    h += '<section class="sec"><div class="sec-h'+(x[2] ? ' '+x[2] : '')+'"><h2>'+x[1]+'</h2><span class="n">'+l.length+'</span></div><div class="list grid2">'+l.map(t => taskCard(t)).join('')+'</div></section>';
+    const batchKey='group:'+esc(key)+':'+x[0],shown=Math.min(l.length,currentTaskLimit(batchKey));
+    h += '<section class="sec"><div class="sec-h'+(x[2] ? ' '+x[2] : '')+'"><h2>'+x[1]+'</h2><span class="n">'+l.length+'</span></div><div class="list grid2">'+l.slice(0,shown).map(t => taskCard(t)).join('')+'</div>'+moreTaskButton(batchKey,l.length,shown)+'</section>';
   });
   if (g.done.length) {
     const open = U.showDone[key];
-    h += '<section class="sec"><div class="sec-h"><h2>Выполнено</h2><span class="n">'+g.done.length+'</span><span class="sp"></span><button type="button" class="more-btn" data-a="toggle-done" data-key="'+key+'">'+(open ? 'Скрыть' : 'Показать')+'</button></div>'
-      + (open ? '<div class="list grid2">'+g.done.map(t => taskCard(t)).join('')+'</div>' : '<p class="hint">Выполненные задачи переходят в архив на следующий день.</p>') + '</section>';
+    h += '<section class="sec"><div class="sec-h"><h2>Выполнено</h2><span class="n">'+g.done.length+'</span><span class="sp"></span><button type="button" class="more-btn" data-a="toggle-done" data-key="'+esc(key)+'">'+(open ? 'Скрыть' : 'Показать')+'</button></div>'
+      + (open ? '<div class="list grid2">'+g.done.slice(0,currentTaskLimit('group:'+esc(key)+':done')).map(t => taskCard(t)).join('')+'</div>'+moreTaskButton('group:'+esc(key)+':done',g.done.length,Math.min(g.done.length,currentTaskLimit('group:'+esc(key)+':done'))) : '<p class="hint">Выполненные задачи переходят в архив на следующий день.</p>') + '</section>';
   }
   return h;
 }
@@ -1000,7 +1105,7 @@ function dashList(key, title, cls, list){
   if (!list.length) return '';
   const open = U.exp[key], shown = open ? list : list.slice(0, 4);
   return '<section class="sec"><div class="sec-h'+(cls ? ' '+cls : '')+'"><h2>'+title+'</h2><span class="n">'+list.length+'</span></div><div class="list grid2">'+shown.map(t => taskCard(t, {compact:true})).join('')+'</div>'
-    + (list.length > 4 ? '<button type="button" class="more-btn" data-a="expand" data-key="'+key+'">'+(open ? 'Свернуть' : 'Показать все ('+list.length+')')+'</button>' : '') + '</section>';
+    + (list.length > 4 ? '<button type="button" class="more-btn" data-a="expand" data-key="'+esc(key)+'">'+(open ? 'Свернуть' : 'Показать все ('+list.length+')')+'</button>' : '') + '</section>';
 }
 function statusBucket(t){ return tStatus(t.status).id; }
 const DASH_WIDGETS = {
@@ -1070,7 +1175,8 @@ function viewDash(){
     line += p.length ? ': ' + p.join(', ') + '.' : '. Просрочек нет.';
   }
   let h = '<div class="hero"><p class="date">'+esc(dstr.charAt(0).toUpperCase() + dstr.slice(1))+'</p><p>'+line+'</p></div>';
-  if (!STORAGE_OK) h = '<div class="banner">Браузер запрещает хранить данные на устройстве (возможно, включён частный режим). Изменения пропадут после закрытия.</div>' + h;
+  if(STORAGE_READONLY)h='<div class="banner">База открыта только для чтения. Не удаляйте приложение и не очищайте данные Safari. <button type="button" class="btn sm" data-a="emergency-export">Сохранить аварийный образ</button></div>'+h;
+  else if (!STORAGE_OK) h = '<div class="banner">Браузер запрещает хранить данные на устройстве (возможно, включён частный режим). Изменения пропадут после закрытия.</div>' + h;
   h += dashOrder().filter(k => !D.settings.dash.hidden[k]).map(widgetHtml).join('');
   h += '<button type="button" class="btn ghost" data-a="dash-settings">'+ic('gear', 18)+'Настроить штаб</button>';
   return h;
@@ -1173,7 +1279,7 @@ function viewBoards(){
   const list = D.boards.slice().sort(byOrder);
   if (!list.length) return '<div class="empty"><b>Досок нет</b>Доска — столбцы с карточками: идеи, учёт, планы.<br><button type="button" class="btn primary" data-a="add-board">'+ic('plus', 18)+'Создать доску</button></div>';
   const b = curBoard(); U.board = b.id;
-  let h = '<div class="bchips">' + list.map(x => '<button type="button" class="fchip'+(x.id === b.id ? ' on' : '')+'" data-a="pick-board" data-id="'+x.id+'">'+(x.kind === 'medals' ? ic('medal', 16) : '')+esc(x.title)+'</button>').join('')
+  let h = '<div class="bchips">' + list.map(x => '<button type="button" class="fchip'+(x.id === b.id ? ' on' : '')+'" data-a="pick-board" data-id="'+esc(x.id)+'">'+(x.kind === 'medals' ? ic('medal', 16) : '')+esc(x.title)+'</button>').join('')
     + '<button type="button" class="fchip" data-a="add-board">'+ic('plus', 16)+'Доска</button></div>';
   h += '<div class="bar"><button type="button" class="btn sm" data-a="board-settings">'+ic('gear', 16)+'Настроить</button><button type="button" class="btn sm" data-a="export-board">'+ic('download', 16)+'Excel</button><span class="sp"></span>';
   if (b.kind === 'medals') h += '<button type="button" class="btn sm" data-a="add-mcol">'+ic('cal', 16)+'Месяц</button><button type="button" class="btn sm" data-a="bulk-people">Списком</button><button type="button" class="btn sm primary" data-a="add-person">'+ic('plus', 16)+'Человек</button>';
@@ -1185,10 +1291,10 @@ function viewBoards(){
     h+='<div class="board-scroll" data-key="medals"><div class="board">'+cols.map(c=>{
       const items=grouped.get(c.id)||[];
       const key='medals:'+c.id, shown=boardVisible(key,items.length);
-      return '<section class="col" data-drop="person" data-col="'+c.id+'"><header class="col-h"><h3>'+esc(c.title)+'</h3><span class="n">'+items.length+'</span>'
-        +(c.kind==='month'?'<button type="button" class="icon-btn" style="width:32px;height:32px" data-a="edit-mcol" data-id="'+c.id+'" aria-label="Настроить столбец">'+ic('more',18)+'</button>':'')+'</header>'
+      return '<section class="col" data-drop="person" data-col="'+esc(c.id)+'"><header class="col-h"><h3>'+esc(c.title)+'</h3><span class="n">'+items.length+'</span>'
+        +(c.kind==='month'?'<button type="button" class="icon-btn" style="width:32px;height:32px" data-a="edit-mcol" data-id="'+esc(c.id)+'" aria-label="Настроить столбец">'+ic('more',18)+'</button>':'')+'</header>'
         +(c.note?'<div class="col-note">'+esc(c.note)+'</div>':'')
-        +'<div class="cards">'+(items.slice(0,shown).map(p=>'<div class="card" data-open="person" data-id="'+p.id+'" data-drag="person"><div class="t-title">'+esc(p.fio)+'</div>'
+        +'<div class="cards">'+(items.slice(0,shown).map(p=>'<div class="card" data-open="person" data-id="'+esc(p.id)+'" data-drag="person"><div class="t-title">'+esc(p.fio)+'</div>'
           +(p.award?'<div class="award">'+ic('medal',16)+'<span>'+esc(p.award)+'</span></div>':'')
           +(p.existing?'<div class="t-note">Имеет: '+esc(p.existing)+'</div>':'')+'</div>').join('')||'<div class="empty-col">Пусто</div>')+'</div>'
         +boardMore(key,items.length,shown)+'</section>';
@@ -1201,10 +1307,10 @@ function viewBoards(){
   h+='<div class="board-scroll" data-key="b-'+b.id+'"><div class="board">'+cols.map(c=>{
     const items=grouped.get(c.id)||[];
     const key='board:'+b.id+':'+c.id,shown=boardVisible(key,items.length);
-    return '<section class="col" data-drop="bcard" data-col="'+c.id+'"><header class="col-h"><h3>'+esc(c.title)+'</h3><span class="n">'+items.length+'</span></header>'
-      +'<div class="cards">'+(items.slice(0,shown).map(x=>'<div class="card" data-open="bcard" data-id="'+x.id+'" data-drag="bcard"><div class="t-title">'+esc(x.title)+'</div>'+boardCardDetail(x,b)+'</div>').join('')||'<div class="empty-col">Пусто</div>')+'</div>'
+    return '<section class="col" data-drop="bcard" data-col="'+esc(c.id)+'"><header class="col-h"><h3>'+esc(c.title)+'</h3><span class="n">'+items.length+'</span></header>'
+      +'<div class="cards">'+(items.slice(0,shown).map(x=>'<div class="card" data-open="bcard" data-id="'+esc(x.id)+'" data-drag="bcard"><div class="t-title">'+esc(x.title)+'</div>'+boardCardDetail(x,b)+'</div>').join('')||'<div class="empty-col">Пусто</div>')+'</div>'
       +boardMore(key,items.length,shown)
-      +'<button type="button" class="col-add" data-a="add-bcard" data-col="'+c.id+'">+ Карточка</button></section>';
+      +'<button type="button" class="col-add" data-a="add-bcard" data-col="'+esc(c.id)+'">+ Карточка</button></section>';
   }).join('')+'</div></div>';
   return h+'<p class="hint">Карточку можно перетащить в другой столбец — удерживайте её на телефоне.</p>';
 
@@ -1234,9 +1340,9 @@ function viewSubs(){
     const L = (p.name || '?').charAt(0).toUpperCase();
     if (L !== last && !q) { if (rows) rows += '</div>'; rows += '<div class="letter">'+esc(L)+'</div><div class="rows">'; last = L; }
     else if (!rows) rows += '<div class="rows">';
-    rows += '<div class="row" data-open="sub" data-id="'+p.id+'"><div class="main"><div class="ttl">'+esc(p.name)+'</div>'
+    rows += '<div class="row" data-open="sub" data-id="'+esc(p.id)+'"><div class="main"><div class="ttl">'+esc(p.name)+'</div>'
       + (p.phone || p.address ? '<div class="sub">'+esc([p.phone, p.address].filter(Boolean).join(', '))+'</div>' : '') + '</div>'
-      + (p.phone ? '<div class="side-r"><a class="icon-btn" href="tel:'+esc(p.phone.replace(/[^\d+]/g, ''))+'" target="_top" aria-label="Позвонить">'+ic('phone', 18)+'</a><button type="button" class="icon-btn" data-a="copy-phone" data-id="'+p.id+'" aria-label="Скопировать номер">'+ic('copy', 18)+'</button></div>' : '')
+      + (p.phone ? '<div class="side-r"><a class="icon-btn" href="tel:'+esc(p.phone.replace(/[^\d+]/g, ''))+'" target="_top" aria-label="Позвонить">'+ic('phone', 18)+'</a><button type="button" class="icon-btn" data-a="copy-phone" data-id="'+esc(p.id)+'" aria-label="Скопировать номер">'+ic('copy', 18)+'</button></div>' : '')
       + '</div>';
   });
   return h + rows + '</div>' + pageControls(page,'subs');
@@ -1255,7 +1361,7 @@ function viewJournal(){
     + '<button type="button" class="btn primary" data-a="add-j">'+ic('plus', 18)+'Запись</button></div>';
   if (!list.length) return h + '<div class="empty"><b>Записей нет</b>Вносите сюда отданные и полученные распоряжения. Из карточки указания запись создаётся кнопкой «Внести в ЖУПиОР».</div>';
   const page=pageWindow(list,'journal',PAGE_SIZE_JOURNAL,JSON.stringify([U.jFilter,U.jSort]));
-  return h + '<div class="rows">' + page.items.map(d => '<div class="row" data-open="j" data-id="'+d.id+'"><div class="jn"><b>№ '+esc(d.number || '—')+'</b><small>'+esc(fmtFull(d.date) || 'без даты')+'</small></div>'
+  return h + '<div class="rows">' + page.items.map(d => '<div class="row" data-open="j" data-id="'+esc(d.id)+'"><div class="jn"><b>№ '+esc(d.number || '—')+'</b><small>'+esc(fmtFull(d.date) || 'без даты')+'</small></div>'
     + '<div class="main"><div class="ttl">'+esc(d.brief || '')+'</div><div class="sub"><span class="dir '+(d.direction === 'in' ? 'in' : 'out')+'">'+(d.direction === 'in' ? 'Получено' : 'Отдано')+'</span> '+esc(d.party || '')+'</div></div></div>').join('') + '</div>'+pageControls(page,'journal');
 }
 
@@ -1276,12 +1382,12 @@ function viewArchive(){
 /* ================= отрисовка ================= */
 function viewTrash(){
   const list = D.trash || [];
-  let h = '<div class="bar"><span class="hint" style="margin:0">Удалённое хранится 30 дней, затем стирается само. Карточку можно перетащить сюда из любого списка — появится зона «В корзину».</span><span class="sp"></span>'
+  let h = '<div class="bar"><span class="hint" style="margin:0">Удалённое хранится до ручного удаления. Карточку можно перетащить сюда из любого списка — появится зона «В корзину».</span><span class="sp"></span>'
     + (list.length ? '<button type="button" class="btn sm danger-o" data-a="trash-clear">'+ic('trash', 16)+'Очистить корзину</button>' : '') + '</div>';
   if (!list.length) return h + '<div class="empty"><b>Корзина пуста</b>Удалённые задачи, карточки, абоненты и записи журнала попадают сюда.</div>';
   const page=pageWindow(list,'trash',PAGE_SIZE_TRASH,'trash');
   return h + '<div class="rows">' + page.items.map(x => '<div class="row" style="cursor:default"><div class="main"><div class="ttl">'+esc(trashLabel(x))+'</div><div class="sub">'+esc(TRASH_KIND[x.kind] || '')+' · удалено '+esc(fmtDT(x.deletedAt))+'</div></div>'
-    + '<div class="side-r"><button type="button" class="btn sm" data-a="trash-restore" data-id="'+x.id+'">'+ic('restore', 16)+'<span class="hide-s">Восстановить</span></button><button type="button" class="icon-btn" data-a="trash-del" data-id="'+x.id+'" aria-label="Удалить навсегда" title="Удалить навсегда">'+ic('x', 18)+'</button></div></div>').join('') + '</div>' + pageControls(page,'trash');
+    + '<div class="side-r"><button type="button" class="btn sm" data-a="trash-restore" data-id="'+esc(x.id)+'">'+ic('restore', 16)+'<span class="hide-s">Восстановить</span></button><button type="button" class="icon-btn" data-a="trash-del" data-id="'+esc(x.id)+'" aria-label="Удалить навсегда" title="Удалить навсегда">'+ic('x', 18)+'</button></div></div>').join('') + '</div>' + pageControls(page,'trash');
 }
 
 /* ===== СКиПП 2.x: дополнительные представления, без миграции базы ===== */
@@ -1375,7 +1481,7 @@ function pageWindow(items, kind, size, signature){
 }
 function pageControls(p,kind){
   if(p.count<=1)return '';
-  return '<nav class="ext-pages" aria-label="Страницы результатов"><button type="button" class="btn sm" data-a="page-prev" data-kind="'+kind+'" '+(p.current===0?'disabled':'')+'>Назад</button><span class="hint">Страница '+(p.current+1)+' из '+p.count+' · всего '+p.total+'</span><button type="button" class="btn sm" data-a="page-next" data-kind="'+kind+'" '+(p.current===p.count-1?'disabled':'')+'>Далее</button></nav>';
+  return '<nav class="ext-pages" aria-label="Страницы результатов"><button type="button" class="btn sm" data-a="page-prev" data-kind="'+esc(kind)+'" '+(p.current===0?'disabled':'')+'>Назад</button><span class="hint">Страница '+(p.current+1)+' из '+p.count+' · всего '+p.total+'</span><button type="button" class="btn sm" data-a="page-next" data-kind="'+esc(kind)+'" '+(p.current===p.count-1?'disabled':'')+'>Далее</button></nav>';
 }
 function changePage(kind,delta){
   if(!['search','journal','archive','trash','subs'].includes(kind))return;
@@ -1762,7 +1868,7 @@ function openTaskForm(t, defaults){
   $('#f-remind', sh).addEventListener('change', e => { $('#f-remind-c-w', sh).hidden = e.target.value !== 'custom'; });
   $('#f-sent-k', sh).addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; sentKind = b.dataset.v; $$('#f-sent-k button', sh).forEach(x => x.classList.toggle('on', x === b)); $('#f-sent-v', sh).placeholder = sentKind === 'address' ? 'Куда отправлено' : 'Кому доведено'; });
   const drawCl = () => {
-    clbox.innerHTML = hasCl ? '<div class="cl-edit" style="margin-top:8px">' + d.checklist.map((i, ix) => '<div class="cl-row"><input type="checkbox" data-ix="'+ix+'"'+(i.done ? ' checked' : '')+' aria-label="Выполнено"><input type="text" data-t="'+ix+'" maxlength="200" placeholder="Пункт" value="'+esc(i.text)+'"><button type="button" class="icon-btn" data-rm="'+ix+'" aria-label="Удалить пункт">'+ic('x', 16)+'</button></div>').join('')
+    clbox.innerHTML = hasCl ? '<div class="cl-edit" style="margin-top:8px">' + d.checklist.map((i, ix) => '<div class="cl-row"><input type="checkbox" data-ix="'+ix+'"'+(i.done ? ' checked' : '')+' aria-label="Выполнено"><input type="text" data-t="'+esc(ix)+'" maxlength="200" placeholder="Пункт" value="'+esc(i.text)+'"><button type="button" class="icon-btn" data-rm="'+ix+'" aria-label="Удалить пункт">'+ic('x', 16)+'</button></div>').join('')
       + '<button type="button" class="btn sm" data-add style="justify-self:start">'+ic('plus', 16)+'Пункт</button></div>' : '';
   };
   const addItem = () => { d.checklist.push({id:uid(), text:'', done:false}); drawCl(); const ins = $$('input[data-t]', clbox); if (ins.length) ins[ins.length - 1].focus(); };
@@ -1789,14 +1895,14 @@ function openTaskForm(t, defaults){
   function persist(f){
     const want = f.status; delete f.status;
     let id = t ? t.id : uid();
-    commit(() => {
+    const accepted=commit(() => {
       let x = t ? D.tasks.find(y => y.id === t.id) : null;
       if (!x) { x = {id:id, createdAt:Date.now(), order:Date.now(), status:'control', completedAt:null, archived:false, spawned:false}; D.tasks.push(x); }
       Object.assign(x, f, {updatedAt:Date.now()});
       setOverall(x, want);
       if (x.archived && !isDone(x)) { x.archived = false; x.archivedAt = null; }
     });
-    return id;
+    return accepted ? id : false;
   }
   sh.addEventListener('click', e => {
     const b = e.target.closest('[data-x]'); if (!b) return;
@@ -1804,17 +1910,22 @@ function openTaskForm(t, defaults){
     const k = b.dataset.x;
     if (k === 'order') copyText(orderText(f), 'Задача скопирована — вставьте в мессенджер');
     else if (k === 'remind') copyText(remindText(f), 'Напоминание скопировано — вставьте в мессенджер');
-    persist(f); closeSheet();
-    if (k === 'journal') openJournalForm(null, {brief:f.title, party:f.assignees.map(a => a.name).join(', '), direction:'out', date:today()});
+    if(!persist(f))return;
+    LAST_COMMIT_RESULT.then(ok=>{if(!ok)return;if(document.body.contains(sh))closeSheet();
+    if (k === 'journal') openJournalForm(null, {brief:f.title, party:f.assignees.map(a => a.name).join(', '), direction:'out', date:today()});});
   });
   sh.addEventListener('longshare', e => {
     const b = e.target.closest('[data-x]'); if (!b || (b.dataset.x !== 'order' && b.dataset.x !== 'remind')) return;
     const f = readForm(); if (!f) return;
     shareText(b.dataset.x === 'order' ? orderText(f) : remindText(f));
-    persist(f); closeSheet();
+    if(!persist(f))return;
+    LAST_COMMIT_RESULT.then(ok=>{if(ok && document.body.contains(sh))closeSheet();});
   });
   bindFoot(sh, {soft:true,
-    onSave:() => { const f = readForm(); if (!f) return false; const was = !t; persist(f); toast(was ? (f.assignees.length ? 'Указание добавлено' : 'Задача добавлена') : 'Сохранено'); },
+    onSave:async () => { const f=readForm();if(!f)return false;const was=!t;
+      if(!persist(f))return false;
+      if(!(await LAST_COMMIT_RESULT))return false;
+      toast(was ? (f.assignees.length ? 'Указание добавлено' : 'Задача добавлена') : 'Сохранено');return true; },
     onDelete:() => commit(() => { const x = D.tasks.find(y => y.id === t.id); if (x) toTrash('task', x); })});
   if (isNew && !defaults.noFocus) setTimeout(() => { if (defaults.forOrder) q.focus(); else $('#f-title', sh).focus(); }, 80);
 }
@@ -1836,7 +1947,7 @@ function openBCard(id,colId){
     const fields=readBoardFields(sh,tmpl);if(fields===null)return false;
     const col=$('#k-c',sh).value,subtitle=$('#k-sub',sh)?.value.trim()||'';
     const note=$('#k-n',sh)?.value.trim()||(c&&c.note||''),remark=$('#k-r',sh)?.value.trim()||(c&&c.remark||'');
-    commit(()=>{if(c){let x=D.bcards.find(y=>y.id===c.id);Object.assign(x,{title,subtitle,fields,note,remark,col});if(col!==cur)x.order=Date.now();}
+    commit(()=>{if(c){let x=D.bcards.find(y=>y.id===c.id);Object.assign(x,{title,subtitle,fields:Object.assign({},x.fields||{},fields),note,remark,col});if(col!==cur)x.order=Date.now();}
       else D.bcards.push({id:uid(),board:b.id,title,subtitle,fields,note,remark,col,order:Date.now()});});
   }});
   if(!c)setTimeout(()=>$('#k-t',sh)?.focus(),80);
@@ -2006,15 +2117,20 @@ function openBoardSettings(){
       else D.bcards = D.bcards.filter(x => x.board !== b.id);
       D.trash.unshift(Object.assign({id:uid(), kind:'board', item:{title:b.title}, deletedAt:Date.now()}, ex));
       U.board = null; }),
-    onSave:() => {
+    onSave:async () => {
       const title = $('#s-t', sh).value.trim(); if (!title) { toast('Введите название'); return false; }
-      commit(() => {
+      const cleanCols=cols.filter(c=>c.title.trim());
+      const keepCols=new Set(cleanCols.map(c=>c.id));
+      const affected=b.kind==='medals'?[]:D.bcards.filter(c=>c.board===b.id&&!keepCols.has(c.col));
+      if(affected.length && !(await confirmDlg('При удалении столбцов '+affected.length+' карточек будут перемещены в корзину. Продолжить?','В корзину')))return false;
+      return commit(() => {
         const x = D.boards.find(y => y.id === b.id); x.title = title; if(b.kind!=='medals'){tmpl.subtitle=$('#st-subtitle',sh).checked; tmpl.fields=tmpl.fields.filter(f=>f.name.trim()).map(f=>({...f,name:f.name.trim().slice(0,80)})); x.template=clone(tmpl);}
         if (b.kind !== 'medals') {
           const clean = cols.filter(c => c.title.trim()).map(c => ({id:c.id, title:c.title.trim()}));
           const keep = new Set(clean.map(c => c.id));
           x.cols = clean;
-          if (clean.length) D.bcards = D.bcards.filter(c => c.board !== b.id || keep.has(c.col));
+          for(const card of D.bcards.filter(c=>c.board===b.id && !keep.has(c.col)))toTrash('bcard',card);
+          // Surviving cards keep their original payload, including hidden form fields.
         }
       });
     }});
@@ -2224,9 +2340,52 @@ function noteBackupExport(encrypted){
     D.settings.lastBackup=Date.now();
   });
 }
+async function emergencyExport(){
+  let record=null,snap=null;
+  try{record=PRIMARY_IDB_ENABLED?await primaryGet():null;}catch(err){console.warn(err);}
+  if(!record){try{const raw=localStorage.getItem(KEY);if(raw)record={raw,pin:localStorage.getItem(PIN_KEY)};}catch(_){}}
+  try{snap=await recoveryGet();}catch(_){}
+  // A lock-screen recovery download must never disclose stale plaintext snapshots.
+  // On a locked encrypted base it may export only encrypted envelopes and PIN metadata.
+  const isEncrypted=raw=>{try{return JSON.parse(raw)?.enc===1;}catch(_){return false;}};
+  if(SEC.locked){
+    if(!pinRecV2()){toast('Аварийную выгрузку открытой базы можно сделать после разблокировки');return false;}
+    if(record?.raw && !isEncrypted(record.raw)){toast('База требует разблокировки для безопасного экспорта');return false;}
+    if(snap?.raw && !isEncrypted(snap.raw))snap=null;
+  }
+  if(!record?.raw&&!snap?.raw){toast('Исходные байты базы недоступны для аварийной выгрузки');return false;}
+  const packet={skipp:'emergency-raw-v1',createdAt:new Date().toISOString(),
+    mainRaw:record?.raw||null,pin:record?.pin||null,previousRaw:snap?.raw||null,
+    note:'Аварийный образ. Для обычного импорта нужен JSON-экспорт приложения. Не публикуйте этот файл.'};
+  const saved=await saveFile('SKiP_emergency_'+today()+'.json',new Blob([JSON.stringify(packet)],{type:'application/json'}));
+  if(saved)toast('Проверьте, что аварийный файл действительно сохранён');
+  return !!saved;
+}
+async function recoveryImportData(d){
+  validateData(d);
+  if(SEC.locked){toast('Для восстановления сначала разблокируйте базу');return false;}
+  if(PENDING_WRITES){toast('Дождитесь завершения записи');return false;}
+  const original=PRIMARY_IDB_ENABLED?await primaryGet():{raw:localStorage.getItem(KEY)};
+  // Must be able to preserve original bytes independently before a forced repair.
+  if(original?.raw){
+    try{await recoveryPutNamed('pre-restore',original.raw);}catch(err){
+      toast('Восстановление остановлено: не удалось сохранить предыдущую базу');return false;
+    }
+  }
+  let encoded=JSON.stringify(d);
+  if(SEC.key){const env=await encStr(SEC.key,JSON.stringify(d));encoded=JSON.stringify({enc:1,iv:env.iv,ct:env.ct});}
+  await writeMain(encoded,undefined,true);
+  STORAGE_READONLY=false;STORAGE_OK=true;LAST_SAVE_ERROR=null;
+  applyLoaded(d);HIST.undo.length=0;HIST.redo.length=0;
+  render();toast('Восстановление сохранено в IndexedDB');return true;
+}
 function backup(){
   if (SEC.decoy) return;
-  if (PENDING_WRITES || STORAGE_READONLY || !STORAGE_OK || SEC.locked) { toast('Дождитесь завершения сохранения перед выгрузкой'); return; }
+  if (PENDING_WRITES || SEC.locked) { toast('Дождитесь сохранения или разблокируйте базу'); return; }
+  if(STORAGE_READONLY || !STORAGE_OK){
+    toast('Хранилище в режиме чтения. Сохраните аварийный образ для восстановления.');
+    emergencyExport();return;
+  }
   const sh = openSheet(head('Выгрузить данные') + '<div class="sh-b">'
     + '<p class="hint" style="margin:0">Задайте пароль на файл — без него данные из файла не прочитать. Пароль понадобится при загрузке на другом устройстве, восстановить его нельзя.</p>'
     + '<label class="fld"><span class="lbl">Пароль на файл</span><input type="password" id="bk-p1" autocomplete="new-password" placeholder="Не короче 12 символов"></label>'
@@ -2275,7 +2434,7 @@ function askFilePassword(env, done){
   setTimeout(() => $('#fp-p', sh).focus(), 80);
 }
 function restoreFrom(file){
-  if (!file || file.size > 20 * 1024 * 1024) { toast('Файл слишком большой (максимум 20 МБ)'); return; }
+  if (!file || file.size > 80 * 1024 * 1024) { toast('Файл слишком большой (максимум 80 МБ)'); return; }
   const r = new FileReader();
   r.onerror = () => toast('Не удалось прочитать файл резервной копии');
   r.onload = () => {
@@ -2283,7 +2442,12 @@ function restoreFrom(file){
     const apply = async d => {
       try { validateData(d); } catch(e) { toast('Файл повреждён или содержит неверную структуру'); return; }
       if (!(await confirmDlg('Заменить все данные на этом устройстве данными из файла? Задач в файле: ' + d.tasks.length + '.', 'Загрузить'))) return;
-      if (commit(() => { applyLoaded(d); })) { await SEC.q; if (!STORAGE_READONLY && STORAGE_OK) toast('Данные загружены'); else toast('Не удалось сохранить восстановленные данные'); }
+      if(STORAGE_READONLY||!STORAGE_OK){
+        try{await recoveryImportData(d);}catch(err){console.error(err);toast('Восстановление остановлено. Исходная база сохранена.');}
+      }else if (commit(() => { applyLoaded(d); })) {
+        const ok=await LAST_COMMIT_RESULT;
+        toast(ok ? 'Данные восстановлены и сохранены' : 'Не удалось сохранить восстановленные данные');
+      }
     };
     if (d && d.skipp === 'enc1') { if (!CRYPTO_OK) { toast('Шифрование недоступно в этом браузере'); return; } askFilePassword(d, apply); }
     else apply(d);
@@ -2308,7 +2472,10 @@ function settingsGroupHtml(g){
     + '<label class="switch"><input type="checkbox" id="st-splash-radio"'+(D.settings.splashRadio !== false ? ' checked' : '')+'><span>Голосовое радиоприветствие по времени суток</span></label>'
     + '<p class="hint" style="margin:0">На iPhone и iPad для включения звука может потребоваться касание экрана.</p>'
     + '<div class="fld"><span class="lbl">Качество видео</span><div class="seg" id="st-sq">'+[['auto','Авто'],['720','720p'],['1080','1080p']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+((D.settings.splashQuality || 'auto') === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div></div>'
-    + '<div class="btn-row"><button type="button" class="btn sm" data-s="splash-test">'+ic('repeat',16)+'Проверить заставку</button></div></div>';
+    + '<div class="btn-row"><button type="button" class="btn sm" data-s="splash-test">'+ic('repeat',16)+'Проверить заставку</button></div></div>'
+    + '<div class="set-sec"><h3>Автономная работа</h3><p id="skipp-offline-state" role="status">Проверяю сохранённые файлы…</p>'
+    + '<div class="btn-row"><button type="button" class="btn sm" data-s="offline-retry">'+ic('download',16)+'Проверить и скачать</button></div>'
+    + '<p class="hint" style="margin:0">Первый запуск проведите с интернетом. Дождитесь сообщения о готовности, прежде чем отключать сеть. Если iPad очистит кэш, файлы потребуется скачать повторно.</p></div>';
   if (g === 'msg') return '<label class="fld"><span class="lbl">Подпись в сообщениях</span><textarea id="st-sign" rows="2" maxlength="300" placeholder="Например: Начальник штаба Петров">'+esc(D.settings.sign || '')+'</textarea><span class="hint" style="margin:0">Добавляется в конец текста «Поставить задачу» и «Напомнить».</span></label>'
     + '<div class="set-sec"><h3>Шаблоны</h3><p>Текст для кнопок «Поставить задачу» и «Напомнить».</p><div class="btn-row"><button type="button" class="btn sm" data-s="tpl">'+ic('send', 16)+'Шаблоны</button></div></div>'
     + '<div class="set-sec"><h3>Код СКиП</h3><label class="switch"><input type="checkbox" id="st-code"'+(D.settings.embedCode ? ' checked' : '')+'><span>Добавлять код в конец сообщения</span></label>'
@@ -2339,6 +2506,7 @@ function openSettings(group){
   const sh = openSheet(head(gi[1]) + '<div class="sh-b">' + settingsGroupHtml(group) + '</div><div class="sh-f"><span class="sp"></span><button type="button" class="btn primary" data-close>Готово</button></div>', {small:true, onClose:refreshRoot});
   const on = (sel, ev, fn) => { const el = $(sel, sh); if (el) el.addEventListener(ev, fn); };
   const segPick = (sel, fn) => on(sel, 'click', e => { const b = e.target.closest('button'); if (!b) return; fn(b.dataset.v); $$(sel + ' button', sh).forEach(x => x.classList.toggle('on', x === b)); });
+  if(group==='look')refreshOfflineSettings();
   segPick('#st-th', v => { if (commit(() => { D.settings.theme = v; })) applyTheme(); });
   segPick('#st-spm', v => { commit(() => { D.settings.splashMode = v; }); });
   segPick('#st-sq', v => { commit(() => { D.settings.splashQuality = v; }); });
@@ -2353,7 +2521,8 @@ function openSettings(group){
   sh.addEventListener('click', async e => {
     const b = e.target.closest('[data-s]'); if (!b) return;
     const k = b.dataset.s;
-    if (k === 'splash-test') { primeIntroAudio();preloadIntroAudio();while (SHEETS.length) closeSheet(); showSplash(()=>{}); }
+    if (k === 'offline-retry') { await requestOfflineDownload();refreshOfflineSettings(); }
+    else if (k === 'splash-test') { primeIntroAudio();preloadIntroAudio();while (SHEETS.length) closeSheet(); showSplash(()=>{}); }
     else if (k === 'dash') { while (SHEETS.length) closeSheet(); openDashSettings(); }
     else if (k === 'tpl') openTemplates();
     else if (k === 'alarm') { while (SHEETS.length) closeSheet(); openAlarm(); }
@@ -2477,7 +2646,7 @@ function openDashSettings(){
 
 /* ================= код-пароль ================= */
 const PIN_KEY = 'skipp_pin';
-function pinSet(){ try { return !!localStorage.getItem(PIN_KEY); } catch (e) { return false; } }
+function pinSet(){ return !!pinRec(); }
 async function hashPin(pin, salt){
   const s = salt + ':' + pin;
   if (window.crypto && crypto.subtle) {
@@ -2509,7 +2678,7 @@ function preloadIntroAudio(){
   for (const path of ['assets/skip-intro-soundtrack.mp3',splashGreetingVoiceFile()]) {
     if(INTRO_AUDIO_LOADING[path])continue;
     INTRO_AUDIO_LOADING[path]=fetch(path).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.arrayBuffer();})
-      .then(bytes=>{INTRO_AUDIO_BUFFERS[path]=bytes;return bytes;}).catch(()=>null);
+      .then(bytes=>{INTRO_AUDIO_BUFFERS[path]=bytes;return bytes;}).catch(()=>{delete INTRO_AUDIO_LOADING[path];return null;});
   }
 }
 function pinPad(title, sub, onDone, opts){
@@ -2520,6 +2689,7 @@ function pinPad(title, sub, onDone, opts){
     + '<div class="pad">'+[1,2,3,4,5,6,7,8,9].map(n => '<button type="button" data-n="'+n+'">'+n+'</button>').join('')
     + (opts.cancel ? '<button type="button" data-c class="pad-t">Отмена</button>' : (opts.forgot ? '<button type="button" data-f class="pad-t">Забыли?</button>' : '<span></span>'))
     + '<button type="button" data-n="0">0</button><button type="button" data-b class="pad-t" aria-label="Стереть">⌫</button></div>'
+    + '<button type="button" class="btn ghost" data-emergency style="margin-top:20px">Аварийная копия зашифрованной базы</button>'
     + '</div>';
   document.body.appendChild(ov); document.body.classList.add('lock');
   let v = '';
@@ -2528,7 +2698,7 @@ function pinPad(title, sub, onDone, opts){
   let busy = false;
   const api = {
     busy(on){ busy = !!on; },
-    close(){ ov.remove(); if (!SHEETS.length) document.body.classList.remove('lock'); },
+    close(){ document.removeEventListener('keydown',kd); ov.remove(); if (!SHEETS.length) document.body.classList.remove('lock'); },
     fail(msg){ busy = false; v = ''; draw(); subEl.textContent = msg; ov.querySelector('.pin-dots').classList.remove('shake'); void ov.offsetWidth; ov.querySelector('.pin-dots').classList.add('shake'); },
     reset(t, s){ busy = false; v = ''; draw(); $('h2', ov).textContent = t; subEl.textContent = s; },
     msg(s){ subEl.textContent = s; }
@@ -2538,6 +2708,7 @@ function pinPad(title, sub, onDone, opts){
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.n != null) press(b.dataset.n);
     else if (b.hasAttribute('data-b') && !busy) { v = v.slice(0, -1); draw(); }
+    else if (b.hasAttribute('data-emergency'))emergencyExport();
     else if (b.hasAttribute('data-c')) api.close();
     else if (b.hasAttribute('data-f') && opts.forgot) opts.forgot(api);
   });
@@ -2546,6 +2717,41 @@ function pinPad(title, sub, onDone, opts){
   return api;
 }
 function autolockMin(){ const v = D.settings.autolock; return v == null ? 5 : Number(v); }
+async function secureLegacyCopies(key){
+  const current=PRIMARY_IDB_ENABLED ? await primaryGet() : null;
+  // Includes a pre-migration stale mirror left intact until a successful PIN unlock.
+  for(const name of [KEY,'skipp_legacy_conflict_v14']){
+    let raw=null;
+    try{raw=localStorage.getItem(name);}catch(_){}
+    if(!raw || (name===KEY && raw===current?.raw))continue;
+    let data;try{data=JSON.parse(raw);}catch(_){continue;}
+    if(data?.enc===1 || !data || !Array.isArray(data.tasks))continue;
+    const env=await encStr(key,raw);
+    const protectedRaw=JSON.stringify({enc:1,iv:env.iv,ct:env.ct});
+    // Preserve the divergent plaintext version as encrypted recovery bytes BEFORE replacing its key.
+    await recoveryPutNamed(name===KEY?'secure-legacy-mirror':'secure-legacy-conflict',protectedRaw);
+    try{
+      if(name===KEY){if(current?.raw)storageWrite(KEY,current.raw);}
+      else storageWrite(name,protectedRaw);
+    }catch(err){
+      // Removal is safe after protected recovery copy was committed to IndexedDB.
+      try{localStorage.removeItem(name);}catch(e){
+        console.error('Открытая старая копия не может быть удалена',e);
+        saveNotice('Осталась незащищённая старая копия; проверьте хранилище','error');
+      }
+    }
+  }
+}
+async function recoveryPutNamed(id,raw){
+  const db=await recoveryDb();
+  return new Promise((resolve,reject)=>{
+    const tx=db.transaction('snapshots','readwrite');
+    tx.objectStore('snapshots').put({id,raw,at:Date.now()});
+    tx.oncomplete=()=>resolve(true);
+    tx.onabort=()=>reject(tx.error||new Error('Не удалось сохранить резервную копию'));
+    tx.onerror=()=>{};
+  });
+}
 async function enablePin(pin){
   if (!/^\d{4}(?:\d{2})?$/.test(pin)) throw new Error('PIN должен содержать 4 или 6 цифр');
   const salt = crypto.getRandomValues(new Uint8Array(16));
@@ -2553,18 +2759,18 @@ async function enablePin(pin){
   const chk = await encStr(key, 'skipp');
   await IDB_WRITE_QUEUE;
   if (PENDING_WRITES || LAST_SAVE_ERROR || !STORAGE_OK || STORAGE_READONLY) throw new Error('Нельзя включить PIN: есть незавершённые или ошибочные записи');
-  const original = localStorage.getItem(KEY);
   const env = await encStr(key, JSON.stringify(D));
-  // Refuse to enable PIN if an old plaintext recovery copy cannot be cleared.
-  await recoveryClear();
-  const newPinRecord = JSON.stringify({v:2, digits:pin.length, salt:b64e(salt), iter:ITER, chk:chk});
-  await writeMain(JSON.stringify({enc:1, iv:env.iv, ct:env.ct}), newPinRecord);
-  try { storageWrite(PIN_KEY, newPinRecord); }
-  catch(e) { setReadOnly(e); throw e; } // IDB retains PIN metadata for startup repair
-  SEC.key = key; SEC.locked = false;
-  // Never retain a plaintext recovery snapshot after PIN encryption is enabled.
-  try { await recoveryPut(localStorage.getItem(KEY)); }
-  catch(err) { console.warn('Не удалось обновить резервный снимок PIN',err); }
+  const newPinRecord=JSON.stringify({v:2,digits:pin.length,salt:b64e(salt),iter:ITER,chk:chk});
+  // The primary and recovery snapshot switch to ciphertext in one IDB transaction.
+  await RECOVERY_SNAPSHOT_QUEUE;
+  await writeMain(JSON.stringify({enc:1,iv:env.iv,ct:env.ct}),newPinRecord,false,true);
+  try { storageWrite(PIN_KEY,newPinRecord); }
+  catch(e) { if(!PRIMARY_IDB_ENABLED) throw e; console.warn('PIN mirror unavailable; IDB PIN authoritative',e); }
+  SEC.key=key;SEC.locked=false;
+  try{await secureLegacyCopies(key);}catch(err){
+    console.error('Старая конфликтная копия требует проверки защиты',err);
+    saveNotice('Проверьте конфликтную копию через аварийную выгрузку','error');
+  }
 }
 async function disablePin(){
   await IDB_WRITE_QUEUE;
@@ -2586,9 +2792,19 @@ async function unlockWith(pin, rec){
 }
 async function openWithKey(key){
   SEC.decoy = false;
-  let obj = null; try { obj = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) {}
+  let obj = null;
+  try {
+    const raw=PRIMARY_IDB_ENABLED ? (await primaryGet())?.raw : localStorage.getItem(KEY);
+    if(PRIMARY_IDB_ENABLED){ LAST_RAW=raw||null; BASELINE_READY=true; }
+    obj=JSON.parse(raw || 'null');
+  } catch(e) { setReadOnly(e); return false; }
   if (obj && obj.enc === 1) { try { applyLoaded(JSON.parse(await decStr(key, obj))); } catch (e) { toast('Данные повреждены и не расшифровываются'); return false; } }
   else if (obj) { try { applyLoaded(obj); } catch(e) { setReadOnly(e); return false; } }
+  if(PRIMARY_IDB_ENABLED)try{await secureLegacyCopies(key);}catch(err){
+    // A verified primary is safe to use; recovery copies remain untouched on failure.
+    console.warn('Невозможно защитить конфликтующие копии',err);
+    saveNotice('Старая копия не проверена, сохраните аварийный архив','error');
+  }
   SEC.key = key; SEC.locked = false;
   HIST.undo.length = 0; HIST.redo.length = 0;
   if (obj && obj.enc !== 1) { const result = saveLocal(); if (result === false) return false; try { await result; } catch(e) { return false; } }
@@ -2653,8 +2869,16 @@ function askPin(then){
 }
 async function lockNow(){
   if (!pinSet() || $('.lock-screen')) return;
-  await SEC.q;
-  if (STORAGE_READONLY || LAST_SAVE_ERROR) { toast('Сохранение не завершено. Сначала создайте резервную копию.'); return; }
+  document.body.classList.add('privacy');
+  if(SETTING_INPUTS.size){
+    await IDB_WRITE_QUEUE;
+    if(!STORAGE_READONLY && STORAGE_OK && !SEC.locked)flushSettings();
+  }
+  try{await SEC.q;}catch(_){}
+  // Access control does not depend on storage health. Close all data-bearing overlays.
+  if(SKIPP_FORCE_CLOSE_SPLASH){try{SKIPP_FORCE_CLOSE_SPLASH();}catch(_){}SKIPP_FORCE_CLOSE_SPLASH=null;}
+  document.querySelectorAll('.ski-splash,.tour').forEach(el=>el.remove());
+  releaseUnusedIntroAudio();
   while (SHEETS.length) closeSheet();
   if (pinRecV2()) { SEC.key = null; SEC.locked = true; SEC.decoy = false; D = blank(); HIST.undo.length = 0; HIST.redo.length = 0; }
   document.body.classList.add('locked');
@@ -2663,7 +2887,7 @@ async function lockNow(){
 }
 function afterUnlock(){
   INTRO_DONE = false;
-  document.body.classList.remove('locked');
+  document.body.classList.remove('locked','privacy');
   autoArchive();render();startIntro();
 }
 
@@ -2998,6 +3222,22 @@ function splashVideoFiles(portrait){
   const base = portrait ? 'portrait' : 'landscape';
   return {src:'assets/skip-intro-'+base+'-'+(high ? '1080' : '720')+'.mp4',poster:'assets/skip-'+base+'-poster.jpg',finished:'assets/skip-hud-'+base+'.jpg'};
 }
+// v4.9.1: Serve cached movies as Blob URLs when there is no connection.
+// Safari handles seeking/byte ranges internally for Blob URLs; do not synthesize 206.
+const SKIPP_MEDIA_CACHE='skipp-scope-'+encodeURIComponent(new URL('./',document.baseURI).pathname)+'-v492-safety-1';
+async function cachedSplashBlob(path){
+  if(!('caches' in window) || !URL.createObjectURL)return null;
+  try{
+    const keys=await caches.keys();
+    if(!keys.includes(SKIPP_MEDIA_CACHE))return null;
+    const cache=await caches.open(SKIPP_MEDIA_CACHE);
+    const response=await cache.match(new URL(path,document.baseURI).href,{ignoreSearch:true});
+    if(!response || !response.ok)return null;
+    const movie=await response.blob();
+    return movie.size>100000 ? URL.createObjectURL(movie) : null;
+  }catch(err){console.warn('Не удалось открыть локальное видео',err);return null;}
+}
+let SKIPP_FORCE_CLOSE_SPLASH=null;
 function showSplash(then){
   const portrait = window.matchMedia('(orientation: portrait)').matches;
   const live = splashLiveData();
@@ -3019,7 +3259,13 @@ function showSplash(then){
   const video=$('.ski-video',ov),frame=$('.ski-frame',ov);
   // The real poster remains visible while iOS initializes the video decoder.
   frame.style.backgroundImage='url("'+media.poster+'")';
-  let done=false,fallback=false,videoEnded=false,triedLow=false,started=false,failTimer=null;
+  let done=false,fallback=false,videoEnded=false,started=false,failTimer=null;
+  let cachedMovieURL=null, switchingSource=false, candidateIndex=0;
+  const lowVideo=media.src.replace('-1080.mp4','-720.mp4');
+  const rawCandidates=navigator.onLine===false
+    ? [{path:media.src,cached:true},{path:lowVideo,cached:true}]
+    : [{path:media.src,cached:false},{path:media.src,cached:true},{path:lowVideo,cached:true},{path:lowVideo,cached:false}];
+  const candidates=rawCandidates.filter((x,i,a)=>a.findIndex(y=>y.path===x.path&&y.cached===x.cached)===i);
   let ctx=INTRO_AUDIO_CONTEXT; INTRO_AUDIO_CONTEXT=null;
   const soundOn=D.settings.splashSound!==false;
   const radioOn=soundOn && D.settings.splashRadio!==false;
@@ -3037,15 +3283,18 @@ function showSplash(then){
     clearTimeout(loadTimeout);clearTimeout(durationTimeout);clearTimeout(failTimer);
   };
   const close=()=>{
-    if(done)return; done=true;clean();stopAudio();
+    if(done)return; done=true;clean();stopAudio();SKIPP_FORCE_CLOSE_SPLASH=null;
     if(ctx){ctx.close().catch(()=>{});ctx=null;}
     video.pause();video.removeAttribute('src');video.load();
-    ov.classList.add('out');setTimeout(()=>{ov.remove();if(then)then();},240);
+    if(cachedMovieURL){URL.revokeObjectURL(cachedMovieURL);cachedMovieURL=null;}
+    ov.classList.add('out');setTimeout(()=>{ov.remove();if(then && !SEC.locked && !document.body.classList.contains('privacy'))then();},240);
   };
+  SKIPP_FORCE_CLOSE_SPLASH=close;
   const showFallback=()=>{
     if(done||fallback)return;fallback=true;video.pause();stopAudio();
+    if(cachedMovieURL){video.removeAttribute('src');video.load();URL.revokeObjectURL(cachedMovieURL);cachedMovieURL=null;}
     frame.style.backgroundImage='url("'+media.finished+'")';
-    frame.classList.add('ski-still');ov.classList.add('ski-show-data');
+    frame.classList.add('ski-still');ov.classList.add('ski-show-data','ski-fallback');
     // Never leave an indefinite monochrome placeholder on a failed media load.
     clearTimeout(durationTimeout);durationTimeout=setTimeout(close,2700);
   };
@@ -3102,13 +3351,29 @@ function showSplash(then){
     }
   };
   const attemptFallback=()=>{
-    if(done||fallback)return;
-    if(!triedLow && /1080/.test(media.src)){
-      triedLow=true;started=false;playing=false;stopAudio();
-      video.pause();video.src=media.src.replace('1080','720');video.load();
-      clearTimeout(loadTimeout);loadTimeout=setTimeout(showFallback,9000);
-      video.play().catch(showFallback);
-    }else showFallback();
+    if(done||fallback||switchingSource)return;
+    switchingSource=true;started=false;playing=false;stopAudio();
+    clearTimeout(loadTimeout);
+    video.pause();video.removeAttribute('src');video.load();
+    if(cachedMovieURL){URL.revokeObjectURL(cachedMovieURL);cachedMovieURL=null;}
+    (async()=>{
+      while(candidateIndex<candidates.length){
+        const candidate=candidates[candidateIndex++];
+        const nextURL=candidate.cached ? await cachedSplashBlob(candidate.path) : candidate.path;
+        if(!nextURL)continue;
+        if(done||fallback){if(candidate.cached)URL.revokeObjectURL(nextURL);return;}
+        cachedMovieURL=candidate.cached ? nextURL : null;
+        video.src=nextURL;video.load();switchingSource=false;
+        loadTimeout=setTimeout(()=>{if(!started)attemptFallback();},8000);
+        video.play().catch(err=>{
+          // Aborted play promises are expected while changing sources.
+          if(err && err.name==='AbortError')return;
+          attemptFallback();
+        });
+        return;
+      }
+      switchingSource=false;showFallback();
+    })().catch(err=>{switchingSource=false;console.warn('Ошибка переключения заставки',err);showFallback();});
   };
   window.addEventListener('orientationchange',orientationChanged);
   document.addEventListener('visibilitychange',onVisibility);
@@ -3127,15 +3392,12 @@ function showSplash(then){
     if(!radioSource)close();
   });
   video.addEventListener('error',attemptFallback);
-  durationTimeout=setTimeout(()=>{if(!done)close();},14500);
+  durationTimeout=setTimeout(()=>{if(!done)close();},32000);
   if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){showFallback();return;}
   video.muted=true;video.defaultMuted=true;
-  // Start with the *real* first frame, no artificial green placeholder.
-  video.src=media.src;
-  video.load();
+  // Online: use the original native 206 responses. Offline: local Blob MP4.
   armAudio();
-  loadTimeout=setTimeout(()=>{if(!started)attemptFallback();},9000);
-  video.play().catch(attemptFallback);
+  attemptFallback();
 }
 
 /* ================= обучение ================= */
@@ -3220,12 +3482,16 @@ function removeDemo(){
   toast('Образец убран');
 }
 let INTRO_DONE = false;
+function releaseUnusedIntroAudio(){
+  if(INTRO_AUDIO_CONTEXT){try{INTRO_AUDIO_CONTEXT.close().catch(()=>{});}catch(_){}INTRO_AUDIO_CONTEXT=null;}
+}
 function startIntro(){
   if (!pinSet() || SEC.locked) return;
   if (INTRO_DONE) return; INTRO_DONE = true;
   const tour = () => { try { if (!localStorage.getItem('skipp_splash_settings_tip')) { localStorage.setItem('skipp_splash_settings_tip','1');setTimeout(()=>toast('Настройки заставки и звука доступны в «Настройки → Оформление»'),500); } } catch(e) {} let seen = false; try { seen = !!localStorage.getItem('skipp_tour'); } catch (e) {} if (!seen) openTour(); else setTimeout(backupReminder, 300); };
   let shown = ''; try { shown = localStorage.getItem('skipp_splash_day') || ''; } catch (e) {}
-  if (D.settings.splash !== false && (D.settings.splashMode !== 'daily' || shown !== today())) { try { localStorage.setItem('skipp_splash_day', today()); } catch (e) {} showSplash(tour); } else tour();
+  if (D.settings.splash !== false && (D.settings.splashMode !== 'daily' || shown !== today())) { try { localStorage.setItem('skipp_splash_day', today()); } catch (e) {} showSplash(tour); }
+  else {releaseUnusedIntroAudio();tour();}
 }
 
 /* ================= перенос задачи через текст сообщения ================= */
@@ -3426,6 +3692,8 @@ async function handle(a, el){
     case 'settings': openSettings(); break;
     case 'undo': undo(); break;
     case 'redo': redo(); break;
+    case 'emergency-export': emergencyExport(); break;
+    case 'task-more': {const k=el.dataset.batchKey;TASK_SHOWN.set(k,currentTaskLimit(k)+TASK_BATCH);render();break;}
     case 'quick-add': quickAdd(); break;
     case 'voice': openVoice(); break;
     case 'paste-task': openPasteTask(); break;
@@ -3502,7 +3770,7 @@ document.addEventListener('change', e => {
   if(e.target.dataset?.change==='ext-bulk-check'){
     if(e.target.checked)EXT_BULK.add(e.target.dataset.id);else EXT_BULK.delete(e.target.dataset.id);
     const counter=document.querySelector('.ext-bulk-bar .hint');
-    if(counter)counter.textContent='Выбрано: '+extBulkSelection().filter(t=>pageWindow(D.tasks.filter(extTaskMatches).sort(urgencySortFast),'search',PAGE_SIZE_SEARCH,JSON.stringify([EXT.q,EXT.status,EXT.priority,EXT.scope])).items.some(x=>x.id===t.id)).length;
+    if(counter)counter.textContent='Выбрано во всех страницах фильтра: '+extBulkSelection().length;
     return;
   }
   if(e.target.id==='ext-bulk-action'){
@@ -3527,8 +3795,9 @@ document.addEventListener('visibilitychange', () => {
   }
   const al = autolockMin();
   if (pinSet() && !SEC.locked && al > 0 && SEC.hiddenAt && Date.now() - SEC.hiddenAt >= al * 60000) lockNow();
-  document.body.classList.remove('privacy');
-  if (!SEC.locked && !$('.lock-screen')) { autoArchive(); render(); }
+  if(!SEC.locked && !$('.lock-screen')){
+    document.body.classList.remove('privacy');autoArchive();render();
+  }
 });
 window.addEventListener('storage', e => {
   if (e.key !== KEY || STORAGE_READONLY || e.newValue === LAST_RAW) return;
@@ -3575,6 +3844,74 @@ async function startApp(){
   }, 15000);
   U.lastDay = today();
 }
-if ('serviceWorker' in navigator && location.protocol === 'https:') { window.addEventListener('load', () => { navigator.serviceWorker.register('sw.js').catch(() => {}); }); }
+/* v4.9.2: observable offline setup. Files are stored only on this device. */
+let SKIPP_OFFLINE_HIDE_TIMER=null;
+function showOfflineNotice(message,kind='progress'){
+  let el=document.getElementById('skipp-offline-notice');
+  if(!el){el=document.createElement('div');el.id='skipp-offline-notice';el.setAttribute('role','status');el.setAttribute('aria-live','polite');document.body.appendChild(el);}
+  clearTimeout(SKIPP_OFFLINE_HIDE_TIMER);
+  el.textContent=message;
+  el.className='skipp-offline-notice '+kind;
+  el.hidden=false;
+  if(kind==='ready')SKIPP_OFFLINE_HIDE_TIMER=setTimeout(()=>{el.hidden=true;},6500);
+}
+async function offlineCacheState(){
+  if(!('caches' in window))return {requiredReady:false,hdReady:false,missing:true};
+  try{
+    const keys=await caches.keys();
+    if(!keys.includes(SKIPP_MEDIA_CACHE))return {requiredReady:false,hdReady:false,missing:true};
+    const cache=await caches.open(SKIPP_MEDIA_CACHE);
+    const required=['./','index.html','manifest.json','icon-180.png','icon-192.png','icon-512.png','styles.css','app.js',
+      'assets/skip-landscape-poster.jpg','assets/skip-portrait-poster.jpg',
+      'assets/skip-hud-landscape.jpg','assets/skip-hud-portrait.jpg',
+      'assets/skip-theme-emerald.webp','assets/skip-theme-muted.webp',
+      'assets/skip-intro-soundtrack.mp3',
+      'assets/skip-intro-landscape-720.mp4','assets/skip-intro-portrait-720.mp4'];
+    const hd=['assets/skip-intro-landscape-1080.mp4','assets/skip-intro-portrait-1080.mp4'];
+    const voices=['assets/voice/01_dobroe_utro.mp3','assets/voice/02_dobryy_den.mp3','assets/voice/03_dobryy_vecher.mp3','assets/voice/04_dobroy_nochi.mp3'];
+    const all=await Promise.all(required.concat(hd,voices).map(path=>cache.match(new URL(path,document.baseURI).href).then(Boolean)));
+    return {requiredReady:all.slice(0,required.length).every(Boolean),hdReady:all.slice(required.length,required.length+hd.length).every(Boolean),voicesReady:all.slice(required.length+hd.length).every(Boolean),missing:false};
+  }catch(err){return {requiredReady:false,hdReady:false,missing:true};}
+}
+async function refreshOfflineSettings(){
+  const el=document.getElementById('skipp-offline-state');if(!el)return;
+  const s=await offlineCacheState();
+  if(!el.isConnected)return;
+  el.textContent=s.requiredReady
+    ? '✓ Интерфейс, музыка и видео 720p сохранены. '+(s.hdReady?'HD сохранено. ':'HD ещё загружается. ')+(s.voicesReady?'Голосовые приветствия сохранены.':'Голоса пока недоступны без сети.')
+    : 'Офлайн-копия ещё не готова. Оставьте приложение открытым с интернетом и нажмите «Проверить и скачать».';
+}
+async function requestOfflineDownload(){
+  if(!('serviceWorker' in navigator)) {showOfflineNotice('Автономное кэширование не поддерживается','error');return;}
+  try{
+    const reg=await navigator.serviceWorker.ready;
+    const worker=navigator.serviceWorker.controller||reg.active||reg.installing;
+    if(!worker)throw new Error('Service Worker не активен');
+    worker.postMessage({type:'SKIPP_OFFLINE_RETRY'});
+    showOfflineNotice('Проверяю и сохраняю файлы для автономного режима…');
+  }catch(err){showOfflineNotice('Не удалось начать загрузку. Проверьте интернет и перезапустите СКиП.','error');}
+}
+if('serviceWorker' in navigator && (location.protocol==='https:' || location.hostname==='localhost' || location.hostname==='127.0.0.1')){
+  navigator.serviceWorker.addEventListener('message',event=>{
+    const d=event.data||{};
+    if(d.type==='SKIPP_OFFLINE_PROGRESS')showOfflineNotice('Сохраняю для работы без сети: '+d.completed+' из '+d.total+' файлов'+(d.failed?' · HD: '+d.failed+' не загружено':''));
+    else if(d.type==='SKIPP_OFFLINE_READY'){
+      if(d.requiredReady)showOfflineNotice(d.hdReady && d.voicesReady ? '✓ СКиП полностью готов к работе без интернета' : '✓ СКиП готов без сети (видео 720p и музыка); дополнительные медиа загружаются', 'ready');
+      else showOfflineNotice('Не удалось сохранить все обязательные файлы','error');
+      refreshOfflineSettings();
+    }else if(d.type==='SKIPP_OFFLINE_ERROR')showOfflineNotice(d.message||'Ошибка сохранения файлов','error');
+  });
+  window.addEventListener('load',()=>{
+    navigator.serviceWorker.register('sw.js?v=492').then(reg=>{
+      if(reg.installing)showOfflineNotice('Сохраняю приложение и медиатеку для автономной работы…');
+      else offlineCacheState().then(s=>{if(!s.requiredReady)showOfflineNotice('Офлайн-копия неполная. Подключите интернет и обновите приложение.','error');});
+    }).catch(async err=>{
+      console.warn('Не удалось проверить обновление Service Worker',err);
+      const state=await offlineCacheState();
+      // A cached app is still usable offline even when the online update check fails.
+      if(!state.requiredReady)showOfflineNotice('Офлайн-копия не готова: откройте СКиП с интернетом','error');
+    });
+  });
+}
 startApp().catch(err => { setReadOnly(err); console.error('Ошибка запуска',err); });
 })();
