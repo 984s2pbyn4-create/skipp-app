@@ -388,7 +388,7 @@ function storageWrite(key, value){ localStorage.setItem(key, value); if (localSt
 function safeIterations(n){ const v = Number(n == null ? ITER : n); if (!Number.isInteger(v) || v < 10000 || v > 2000000) throw new Error('Недопустимые параметры шифрования'); return v; }
 function blank(){
   return {v:2, tasks:[], boards:[], bcards:[], people:[], mcols:[], subs:[], journal:[], trash:[],
-    settings:{theme:'emerald', splashQuality:'1080', splashSound:true, splashRadio:true, splashMode:'always', splash:true, sign:'', dash:{order:DASH_DEFAULT.slice(), hidden:{}, custom:{}},
+    settings:{theme:'headquarters', splashQuality:'1080', splashSound:true, splashRadio:true, splashMode:'always', splash:true, sign:'', dash:{order:DASH_DEFAULT.slice(), hidden:{}, custom:{}},
       taskStatuses:clone(DEF_TASK_ST), asgStatuses:clone(DEF_ASG_ST), views:{mine:'list', orders:'list'},
       tpl:{order:'emoji', remind:'emoji', customOrder:'', customRemind:''}}};
 }
@@ -761,7 +761,13 @@ function toast(msg){
   document.body.appendChild(el);
   clearTimeout(toastTimer); toastTimer = setTimeout(() => el.remove(), 2600);
 }
-function applyTheme(){ const t = D.settings.theme; if (t) document.documentElement.setAttribute('data-theme', t); else document.documentElement.removeAttribute('data-theme'); }
+function applyTheme(){
+  const legacy = {emerald:'command',hybrid:'command',graphite:'headquarters',holo:'tactical',executive:'daylight'};
+  const chosen = D.settings.theme || '';
+  const t = legacy[chosen] || chosen;
+  if (t) document.documentElement.setAttribute('data-theme', t);
+  else document.documentElement.removeAttribute('data-theme');
+}
 const optsHtml = (list, cur) => list.map(x => '<option value="'+esc(x[0])+'"'+(String(cur) === String(x[0]) ? ' selected' : '')+'>'+esc(x[1])+'</option>').join('');
 
 /* ================= листы (модальные окна) ================= */
@@ -821,7 +827,7 @@ function countBadge(id){
 }
 function sideHtml(){
   const btn = s => { const c = countBadge(s.id); return '<button type="button" data-a="tab" data-tab="'+s.id+'" class="'+(U.tab === s.id ? 'on' : '')+'"'+(U.tab === s.id ? ' aria-current="page"' : '')+'>'+ic(s.icon, 20)+'<span>'+s.title+'</span>'+(c && c.n ? '<span class="cnt'+(c.bad ? ' bad' : '')+'">'+c.n+'</span>' : '')+'</button>'; };
-  return '<div class="brand"><img class="mark-img" src="icon-192.png" alt="" width="36" height="36"><div><b>СКиП</b><small>система контроля и планирования</small></div></div>'
+  return '<div class="brand"><img class="mark-img" src="icon-512.png" alt="Эмблема СКиП" width="120" height="120"></div>'
     + '<nav class="nav" aria-label="Разделы">' + SECTIONS.slice(0, 4).map(btn).join('') + '<div class="nav-sep"></div>' + SECTIONS.slice(4).map(btn).join('') + '</nav>'
     + '<div class="grow"></div><nav class="nav"><button type="button" data-a="settings">'+ic('gear', 20)+'<span>Настройки</span></button></nav>';
 }
@@ -831,7 +837,7 @@ function tabbarHtml(){
     + '<button type="button" data-a="more" class="'+(inMore ? 'on' : '')+'">'+ic('grid', 24)+'<span>'+(inMore ? secOf(U.tab).title : 'Ещё')+'</span></button>';
 }
 function topHtml(){
-  return '<h1>'+esc(secOf(U.tab).title)+'</h1><div class="acts">'
+  return '<img class="mobile-brand-mark" src="icon-192.png" alt="" width="48" height="48"><h1>'+esc(secOf(U.tab).title)+'</h1><div class="acts">'
     + '<button type="button" class="icon-btn" data-a="undo"'+(HIST.undo.length ? '' : ' disabled')+' aria-label="Отменить действие" title="Отменить">'+ic('undo')+'</button>'
     + '<button type="button" class="icon-btn" data-a="redo"'+(HIST.redo.length ? '' : ' disabled')+' aria-label="Вернуть действие" title="Вернуть">'+ic('redo')+'</button></div>';
 }
@@ -2287,7 +2293,7 @@ function restoreFrom(file){
 
 /* ================= настройки ================= */
 const SET_GROUPS = [
-  ['look', 'Оформление', 'grid', () => ({'':'Как в системе',light:'Светлое',dark:'Тёмное',emerald:'Изумрудный штаб',graphite:'Тактический графит',holo:'Голографический центр',hybrid:'Изумрудный HUD',executive:'Светлый командный',command:'Командный HUD',headquarters:'Тёмный штаб',tactical:'Тактическая сетка',daylight:'Дневной изумруд'}[D.settings.theme || ''] || 'Как в системе') + ' · заставка: ' + (D.settings.splash === false ? 'выкл.' : D.settings.splashMode === 'daily' ? 'раз в сутки' : 'каждый запуск')],
+  ['look', 'Оформление', 'grid', () => ({'':'Как в системе',light:'Светлое',dark:'Тёмное',command:'Командный HUD',headquarters:'Тёмный штаб',tactical:'Тактическая сетка',daylight:'Дневной изумруд',emerald:'Командный HUD',hybrid:'Командный HUD',graphite:'Тёмный штаб',holo:'Тактическая сетка',executive:'Дневной изумруд'}[D.settings.theme || ''] || 'Как в системе') + ' · заставка: ' + (D.settings.splash === false ? 'выкл.' : D.settings.splashMode === 'daily' ? 'раз в сутки' : 'каждый запуск')],
   ['msg', 'Сообщения', 'send', () => 'Подпись, шаблоны' + (D.settings.embedCode ? ', код СКиП' : '')],
   ['lists', 'Списки и статусы', 'boards', () => 'Мои: ' + (D.settings.views.mine === 'kanban' ? 'канбан' : 'список') + ' · Указания: ' + (D.settings.views.orders === 'kanban' ? 'канбан' : 'список') + ' · блоки штаба'],
   ['safe', 'Защита', 'lock', () => pinSet() ? 'Код включён' + (!SEC.decoy && auxRec() ? ' · тревога' : '') : 'Код выключен'],
@@ -2295,7 +2301,7 @@ const SET_GROUPS = [
   ['help', 'Обучение', 'hq', () => 'Обзор возможностей' + (hasDemo() ? ' · образец добавлен' : ' и образец')]
 ];
 function settingsGroupHtml(g){
-  if (g === 'look') return '<div class="fld"><span class="lbl">Тема</span><div class="seg" id="st-th">'+[['', 'Как в системе'], ['light', 'Светлое'], ['dark', 'Тёмное'], ['emerald','Изумрудный штаб'],['graphite','Графит'],['holo','Голографический'],['hybrid','Изумрудный HUD'],['executive','Светлый командный'],['command','Командный HUD · премиум'],['headquarters','Тёмный штаб · металл'],['tactical','Тактическая сетка'],['daylight','Дневной изумруд']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+((D.settings.theme || '') === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div></div>'
+  if (g === 'look') return '<div class="fld"><span class="lbl">Тема</span><div class="seg" id="st-th">'+[['', 'Как в системе'], ['light', 'Светлое'], ['dark', 'Тёмное'],['command','Командный HUD'],['headquarters','Тёмный штаб'],['tactical','Тактическая сетка'],['daylight','Дневной изумруд']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+((({emerald:'command',hybrid:'command',graphite:'headquarters',holo:'tactical',executive:'daylight'})[D.settings.theme] || D.settings.theme || '') === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div></div>'
     + '<div class="set-sec"><h3>Кинематографическая заставка СКиП</h3><label class="switch"><input type="checkbox" id="st-splash"'+(D.settings.splash !== false ? ' checked' : '')+'><span>Показывать при запуске</span></label>'
     + '<div class="seg" id="st-spm">'+[['always', 'Каждый запуск'], ['daily', 'Раз в сутки']].map(x => '<button type="button" data-v="'+x[0]+'" class="'+((D.settings.splashMode || 'always') === x[0] ? 'on' : '')+'">'+x[1]+'</button>').join('')+'</div>'
     + '<label class="switch"><input type="checkbox" id="st-splash-sound"'+(D.settings.splashSound !== false ? ' checked' : '')+'><span>Звук кинематографической заставки</span></label>'
@@ -2347,7 +2353,7 @@ function openSettings(group){
   sh.addEventListener('click', async e => {
     const b = e.target.closest('[data-s]'); if (!b) return;
     const k = b.dataset.s;
-    if (k === 'splash-test') { while (SHEETS.length) closeSheet(); showSplash(()=>{}); }
+    if (k === 'splash-test') { primeIntroAudio();preloadIntroAudio();while (SHEETS.length) closeSheet(); showSplash(()=>{}); }
     else if (k === 'dash') { while (SHEETS.length) closeSheet(); openDashSettings(); }
     else if (k === 'tpl') openTemplates();
     else if (k === 'alarm') { while (SHEETS.length) closeSheet(); openAlarm(); }
@@ -2481,18 +2487,30 @@ async function hashPin(pin, salt){
   let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return 'f' + (h >>> 0).toString(16);
 }
 let INTRO_AUDIO_CONTEXT=null;
-let INTRO_SOUND_REQUESTED=true;
+let INTRO_AUDIO_BUFFERS={};
+let INTRO_AUDIO_LOADING={};
 function primeIntroAudio(){
+  // The last digit is a genuine user gesture. Resume WebAudio *in that handler*;
+  // async password verification must never be relied on to unlock Safari audio.
   try {
     const AC=window.AudioContext || window.webkitAudioContext;
     if(!AC)return false;
-    if(!INTRO_AUDIO_CONTEXT)INTRO_AUDIO_CONTEXT=new AC();
+    if(!INTRO_AUDIO_CONTEXT || INTRO_AUDIO_CONTEXT.state==='closed') INTRO_AUDIO_CONTEXT=new AC();
     const ctx=INTRO_AUDIO_CONTEXT;
-    const buffer=ctx.createBuffer(1,1,ctx.sampleRate); const source=ctx.createBufferSource();
-    source.buffer=buffer;source.connect(ctx.destination);source.start(0);
+    // One-sample source initiates the iOS audio session without an audible click.
+    const source=ctx.createBufferSource();source.buffer=ctx.createBuffer(1,1,ctx.sampleRate);
+    source.connect(ctx.destination);source.start();
     ctx.resume().catch(()=>{});
     return true;
   }catch(e){return false;}
+}
+function preloadIntroAudio(){
+  if(typeof fetch!=='function')return;
+  for (const path of ['assets/skip-intro-soundtrack.mp3',splashGreetingVoiceFile()]) {
+    if(INTRO_AUDIO_LOADING[path])continue;
+    INTRO_AUDIO_LOADING[path]=fetch(path).then(r=>{if(!r.ok)throw Error('HTTP '+r.status);return r.arrayBuffer();})
+      .then(bytes=>{INTRO_AUDIO_BUFFERS[path]=bytes;return bytes;}).catch(()=>null);
+  }
 }
 function pinPad(title, sub, onDone, opts){
   opts = opts || {};
@@ -2502,30 +2520,8 @@ function pinPad(title, sub, onDone, opts){
     + '<div class="pad">'+[1,2,3,4,5,6,7,8,9].map(n => '<button type="button" data-n="'+n+'">'+n+'</button>').join('')
     + (opts.cancel ? '<button type="button" data-c class="pad-t">Отмена</button>' : (opts.forgot ? '<button type="button" data-f class="pad-t">Забыли?</button>' : '<span></span>'))
     + '<button type="button" data-n="0">0</button><button type="button" data-b class="pad-t" aria-label="Стереть">⌫</button></div>'
-    + (opts.showSound ? '<div class="pin-sound-box"><button type="button" class="pin-sound-button" data-sound><span class="pin-sound-dot"></span>🔊 <span class="pin-sound-label">Активировать звук заставки</span></button><p class="pin-sound-help">На iPhone и iPad звук иногда блокируется системой. Если заставка беззвучна, нажмите эту кнопку перед вводом PIN.</p><button type="button" data-sound-info class="pin-help-link">Почему требуется нажатие?</button></div>' : '')
     + '</div>';
   document.body.appendChild(ov); document.body.classList.add('lock');
-  if(opts.showSound){
-    try{INTRO_SOUND_REQUESTED=localStorage.getItem('skipp_intro_audio_pref')!=='off';}catch(e){INTRO_SOUND_REQUESTED=true;}
-    const b=ov.querySelector('[data-sound]');
-    const update=armed=>{b.classList.toggle('armed',!!armed);b.querySelector('.pin-sound-label').textContent=armed?'Звук активирован ✓':'Принудительно включить звук';};
-    update(false);
-    b.addEventListener('click',()=>{
-      // This is an enable/prime action, never a toggle that silently disables sound.
-      INTRO_SOUND_REQUESTED=true;
-      try{localStorage.setItem('skipp_intro_audio_pref','on');}catch(e){}
-      const armed=primeIntroAudio();update(armed);
-      if(!armed){ov.querySelector('.pin-sound-help').textContent='Не удалось активировать звук. При появлении заставки нажмите кнопку включения звука ещё раз.';}
-    });
-    const info=()=>{
-      const help=ov.querySelector('.pin-sound-help');
-      help.textContent='iOS ограничивает запуск звука без касания. Включите звук здесь, а если система всё равно блокирует его, нажмите подсвеченную кнопку на заставке. Настройки доступны в разделе «Оформление».';
-      help.classList.add('pin-sound-important');
-      try{localStorage.setItem('skipp_sound_hint_seen','1');}catch(e){}
-    };
-    ov.querySelector('[data-sound-info]').addEventListener('click',info);
-    try{if(!localStorage.getItem('skipp_sound_hint_seen')){info();}}catch(e){}
-  }
   let v = '';
   const dots = $$('.pin-dots i', ov), subEl = $('.lock-sub', ov);
   const draw = () => dots.forEach((d, i) => d.classList.toggle('on', i < v.length));
@@ -2537,7 +2533,7 @@ function pinPad(title, sub, onDone, opts){
     reset(t, s){ busy = false; v = ''; draw(); $('h2', ov).textContent = t; subEl.textContent = s; },
     msg(s){ subEl.textContent = s; }
   };
-  const press = n => { if (busy || v.length >= digits) return; v += n; draw(); if (v.length === digits) { if(opts.showSound && INTRO_SOUND_REQUESTED)primeIntroAudio(); busy = true; const x = v; setTimeout(() => onDone(x, api), 120); } };
+  const press = n => { if (busy || v.length >= digits) return; v += n; draw(); if (v.length === digits) { if(opts.startupUnlock){primeIntroAudio();preloadIntroAudio();} busy = true; const x = v; setTimeout(() => onDone(x, api), 80); } };
   ov.addEventListener('click', e => {
     const b = e.target.closest('button'); if (!b) return;
     if (b.dataset.n != null) press(b.dataset.n);
@@ -2629,6 +2625,7 @@ function askPin(then){
   const rec = pinRec();
   if (!rec) { then(); return; }
   if ($('.lock-screen')) return;
+  preloadIntroAudio();
   const FK = 'skipp_pin_fail', MAX = 10;
   const getF = () => { try { return Number(localStorage.getItem(FK)) || 0; } catch (e) { return 0; } };
   const setF = n => { try { localStorage.setItem(FK, String(n)); } catch (e) {} };
@@ -2647,7 +2644,7 @@ function askPin(then){
     const n = getF() + 1; setF(n);
     if (n >= MAX) { api.fail('Превышено число попыток. Данные сохранены. Проверьте PIN или восстановите резервную копию.'); return; }
     api.fail(n >= 6 ? 'Неверный код. Осталось попыток: ' + (MAX - n) + '. Данные не удаляются' : 'Неверный код');
-  }, {showSound:true, digits:rec.digits === 6 ? 6 : 4, forgot: async api => {
+  }, {startupUnlock:true, digits:rec.digits === 6 ? 6 : 4, forgot: async api => {
     api.close();
     const ok = await confirmDlg('Код восстановить нельзя. Можно сбросить приложение: будут удалены ВСЕ задачи и данные на этом устройстве. Если у вас есть выгруженный файл, данные можно будет загрузить из него.', 'Удалить всё и сбросить');
     if (ok) { try { await eraseAllLocalData(); location.reload(); } catch (e) { console.error(e); toast('Сброс не завершён. Данные могут сохраняться — повторите попытку после закрытия других вкладок.'); askPin(then); } }
@@ -2667,7 +2664,6 @@ async function lockNow(){
 function afterUnlock(){
   INTRO_DONE = false;
   document.body.classList.remove('locked');
-  if (D.settings.splashSound !== false) INTRO_SOUND_REQUESTED = INTRO_SOUND_REQUESTED !== false;
   autoArchive();render();startIntro();
 }
 
@@ -3009,144 +3005,137 @@ function showSplash(then){
   const ov = document.createElement('div');
   ov.className = 'splash ski-splash ' + (portrait ? 'ski-portrait' : 'ski-landscape');
   ov.setAttribute('role','dialog'); ov.setAttribute('aria-modal','true'); ov.setAttribute('aria-label','Заставка СКиП');
-  const escCard = (c,i) => '<div class="ski-stat ski-stat-'+i+'"><div class="ski-stat-label">'+esc(c[0])+'</div><strong class="ski-stat-value">'+esc(c[1])+'</strong></div>';
-  ov.innerHTML = '<div class="ski-frame" id="ski-frame">'
+  const escCard=(c,i)=>'<div class="ski-stat ski-stat-'+i+'"><div class="ski-stat-label">'+esc(c[0])+'</div><strong class="ski-stat-value">'+esc(c[1])+'</strong></div>';
+  ov.innerHTML='<div class="ski-frame" id="ski-frame">'
+    + '<div class="ski-loading" aria-hidden="true"></div>'
     + '<video class="ski-video" playsinline webkit-playsinline preload="auto" muted poster="'+media.poster+'" aria-label="Заставка СКиП"></video>'
     + '<div class="ski-hud" aria-live="off">'
     + '<div class="ski-greeting">'+esc(live.welcome)+'</div>'
     + '<div class="ski-date">'+esc(live.day)+'</div>'
     + live.cards.map(escCard).join('')
-    + '<div class="ski-summary">'+esc(live.summary)+'</div>'
-    + '</div></div>'
-    + '<div class="ski-actions"><button type="button" class="ski-sound" title="Перезапустить заставку со звуком и радиоприветствием">'+ic('bell',16)+'<span>Включить звук' + (D.settings.splashRadio === false ? '' : ' и голос') + '</span></button>'
-    + '<button type="button" class="ski-close">Пропустить '+ic('chevR',16)+'</button></div>';
+    + '<div class="ski-summary">'+esc(live.summary)+'</div></div></div>'
+    + '<div class="ski-actions"><button type="button" class="ski-close">Пропустить '+ic('chevR',16)+'</button></div>';
   document.body.appendChild(ov);
-  const video=$('.ski-video',ov),frame=$('.ski-frame',ov), btn=$('.ski-sound',ov);
-  let done=false, fallback=false, soundEnabled=false, videoEnded=false, triedLow=false;
-  let radioContext=INTRO_AUDIO_CONTEXT, radioBuffer=null, radioSource=null, radioPending=null, radioStarted=false, radioPlaying=false; INTRO_AUDIO_CONTEXT=null;
-  const hasAudio = D.settings.splashSound !== false;
-  const hasRadio = hasAudio && D.settings.splashRadio !== false;
-  const soundLabel = hasRadio ? 'Включить звук и голос' : 'Включить звук';
-  const wantAudio=hasAudio && INTRO_SOUND_REQUESTED !== false;
-  btn.hidden = !hasAudio; btn.classList.add('ski-highlight-sound');
-  const stopRadio = () => {
-    if(radioSource){ try {radioSource.onended=null;radioSource.stop();}catch(e){} radioSource=null; }
-    radioPlaying=false;
+  const video=$('.ski-video',ov),frame=$('.ski-frame',ov);
+  // The real poster remains visible while iOS initializes the video decoder.
+  frame.style.backgroundImage='url("'+media.poster+'")';
+  let done=false,fallback=false,videoEnded=false,triedLow=false,started=false,failTimer=null;
+  let ctx=INTRO_AUDIO_CONTEXT; INTRO_AUDIO_CONTEXT=null;
+  const soundOn=D.settings.splashSound!==false;
+  const radioOn=soundOn && D.settings.splashRadio!==false;
+  let soundtrack=null,radioSource=null,musicGain=null,radioStarted=false,radioBuffer=null,radioPromise=null;
+  let soundtrackBuffer=null,soundtrackPromise=null;
+  let playing=false;
+  let loadTimeout=null,durationTimeout=null;
+  const stopAudio=()=>{
+    for(const source of [soundtrack,radioSource])if(source){try{source.onended=null;source.stop();}catch(e){}}
+    soundtrack=null;radioSource=null;
   };
-  const close = () => {
-    if(done) return; done=true;
-    stopRadio();
-    if(radioContext){radioContext.close().catch(()=>{});radioContext=null;}
-    video.pause(); video.removeAttribute('src'); video.load();
+  const clean=()=>{
     window.removeEventListener('orientationchange',orientationChanged);
     document.removeEventListener('visibilitychange',onVisibility);
-    clearTimeout(loadTimeout);clearTimeout(durationTimeout);
-    ov.classList.add('out');setTimeout(()=>{ov.remove(); if(then)then();},300);
+    clearTimeout(loadTimeout);clearTimeout(durationTimeout);clearTimeout(failTimer);
   };
-  // A user gesture unlocks WebAudio on iOS. Audio is decoded asynchronously and
-  // emitted only when the live greeting text appears at the end of the video.
-  const armRadio = () => {
-    if(!hasRadio || !soundEnabled || done)return;
-    const AC = window.AudioContext || window.webkitAudioContext;
-    if(!AC)return;
-    try {
-      if(!radioContext)radioContext=new AC();
-      radioContext.resume().catch(()=>{}); // call synchronously in the button gesture
-      if(!radioPending){
-        const ctx=radioContext;
-        radioPending=fetch(splashGreetingVoiceFile()).then(r=>{if(!r.ok)throw new Error('Radio voice not available');return r.arrayBuffer();})
-          .then(bytes=>ctx.decodeAudioData(bytes)).then(buffer=>{if(!done){radioBuffer=buffer; maybeRadio();}})
-          .catch(()=>{}); // Intro remains functional even if the voice file is missing/offline
-      }
-    } catch(e){}
+  const close=()=>{
+    if(done)return; done=true;clean();stopAudio();
+    if(ctx){ctx.close().catch(()=>{});ctx=null;}
+    video.pause();video.removeAttribute('src');video.load();
+    ov.classList.add('out');setTimeout(()=>{ov.remove();if(then)then();},240);
   };
-  const maybeRadio = () => {
-    if(done || fallback || !hasRadio || !soundEnabled || radioStarted || !radioBuffer || !radioContext || radioContext.state!=='running')return;
-    if(video.currentTime<5.60 || video.currentTime>7.40)return;
-    try {
-      const source=radioContext.createBufferSource(); source.buffer=radioBuffer;
-      const level=radioContext.createGain(); level.gain.value=0.92;
-      source.connect(level);level.connect(radioContext.destination);
-      radioSource=source;radioStarted=true;radioPlaying=true;
-      // On iOS the video volume slider is read-only: mute the soundtrack during the spoken message.
-      video.muted=true;
-      source.onended=()=>{radioPlaying=false;radioSource=null;if(!done){if(!videoEnded && soundEnabled)video.muted=false;else if(videoEnded)setTimeout(close,260);}};
-      source.start();
-    } catch(e){radioPlaying=false;}
-  };
-  const showFallback = () => {
-    if(done || fallback)return;fallback=true;video.pause();stopRadio();
+  const showFallback=()=>{
+    if(done||fallback)return;fallback=true;video.pause();stopAudio();
     frame.style.backgroundImage='url("'+media.finished+'")';
-    frame.classList.add('ski-still');ov.classList.add('ski-show-data');btn.hidden=true;
+    frame.classList.add('ski-still');ov.classList.add('ski-show-data');
+    // Never leave an indefinite monochrome placeholder on a failed media load.
+    clearTimeout(durationTimeout);durationTimeout=setTimeout(close,2700);
   };
-  const sync = () => {
+  const decode=path=>{
+    if(!ctx)return Promise.resolve(null);
+    const getBytes=INTRO_AUDIO_BUFFERS[path] ? Promise.resolve(INTRO_AUDIO_BUFFERS[path]) :
+      (INTRO_AUDIO_LOADING[path] || fetch(path).then(r=>{if(!r.ok)throw Error('audio');return r.arrayBuffer();}));
+    return getBytes.then(bytes=>bytes?ctx.decodeAudioData(bytes.slice(0)):null).catch(()=>null);
+  };
+  const armAudio=()=>{
+    if(!soundOn)return;
+    const AC=window.AudioContext || window.webkitAudioContext;
+    if(!AC)return;
+    if(!ctx){try{ctx=new AC();}catch(e){return;}}
+    ctx.resume().catch(()=>{});
+    if(!soundtrackPromise){soundtrackPromise=decode('assets/skip-intro-soundtrack.mp3').then(buf=>{soundtrackBuffer=buf;startSoundtrack();});}
+    if(radioOn && !radioPromise){radioPromise=decode(splashGreetingVoiceFile()).then(buf=>{radioBuffer=buf;maybeRadio();});}
+  };
+  const startSoundtrack=()=>{
+    if(done||fallback||!soundOn||!ctx||ctx.state!=='running'||!playing||soundtrack||!soundtrackBuffer)return;
+    try{
+      const t=Math.max(0,Math.min(video.currentTime,soundtrackBuffer.duration-.04));
+      const source=ctx.createBufferSource();source.buffer=soundtrackBuffer;
+      musicGain=ctx.createGain(); musicGain.gain.value=.82;
+      source.connect(musicGain);musicGain.connect(ctx.destination);
+      source.start(0,t);soundtrack=source;
+    }catch(e){console.warn('Не удалось запустить дорожку заставки',e);}
+  };
+  const maybeRadio=()=>{
+    if(done||fallback||!radioOn||!playing||!ctx||ctx.state!=='running'||radioStarted||!radioBuffer)return;
+    if(video.currentTime<5.60||video.currentTime>7.50)return;
+    try{
+      const source=ctx.createBufferSource();source.buffer=radioBuffer;
+      const level=ctx.createGain();level.gain.value=.95;
+      source.connect(level);level.connect(ctx.destination);
+      radioSource=source;radioStarted=true;
+      if(musicGain)musicGain.gain.setTargetAtTime(.22,ctx.currentTime,.045);
+      source.onended=()=>{radioSource=null;if(done)return;if(musicGain)musicGain.gain.setTargetAtTime(.82,ctx.currentTime,.07);if(videoEnded)close();};
+      source.start();
+    }catch(e){console.warn('Не удалось воспроизвести приветствие',e);}
+  };
+  const sync=()=>{
     if(done)return;
-    ov.classList.toggle('ski-show-data',fallback || video.currentTime>=5.65);
-    if(!fallback)maybeRadio();
+    ov.classList.toggle('ski-show-data',fallback||video.currentTime>=5.65);
+    if(!fallback){startSoundtrack();maybeRadio();}
   };
-  const orientationChanged = () => {
-    if(window.matchMedia('(orientation: portrait)').matches===portrait)return;
-    close(); // avoid distorted video after device rotation
-  };
+  const orientationChanged=()=>{if(window.matchMedia('(orientation: portrait)').matches!==portrait)close();};
   const onVisibility=()=>{
     if(done)return;
-    if(document.hidden){video.pause();if(radioContext && radioContext.state==='running')radioContext.suspend().catch(()=>{});}
+    if(document.hidden){video.pause();playing=false;stopAudio();if(ctx&&ctx.state==='running')ctx.suspend().catch(()=>{});}
     else if(!fallback){
-      // iOS may suspend WebAudio after backgrounding. Require a new tap before audible playback.
-      if(radioContext && radioContext.state==='suspended'){soundEnabled=false;stopRadio();video.muted=true;btn.querySelector('span').textContent=soundLabel;}
-      video.play().catch(()=>{});
+      if(ctx)ctx.resume().catch(()=>{});
+      video.play().catch(()=>attemptFallback());
     }
+  };
+  const attemptFallback=()=>{
+    if(done||fallback)return;
+    if(!triedLow && /1080/.test(media.src)){
+      triedLow=true;started=false;playing=false;stopAudio();
+      video.pause();video.src=media.src.replace('1080','720');video.load();
+      clearTimeout(loadTimeout);loadTimeout=setTimeout(showFallback,9000);
+      video.play().catch(showFallback);
+    }else showFallback();
   };
   window.addEventListener('orientationchange',orientationChanged);
   document.addEventListener('visibilitychange',onVisibility);
   $('.ski-close',ov).addEventListener('click',e=>{e.stopPropagation();close();});
-  ov.addEventListener('click',e=>{if(e.target===ov)close();});
-  btn.addEventListener('click',e=>{
-    e.stopPropagation();if(done || fallback)return;
-    if(!soundEnabled){
-      soundEnabled=true;radioStarted=false;radioBuffer=null;radioPending=null;stopRadio();videoEnded=false;
-      video.pause();video.currentTime=0;video.muted=false;
-      armRadio();
-      clearTimeout(durationTimeout);durationTimeout=setTimeout(()=>{if(!done && !fallback)close();},13000);
-      btn.querySelector('span').textContent='Выключить звук';
-      video.play().catch(()=>{soundEnabled=false;video.muted=true;btn.querySelector('span').textContent=soundLabel;video.play().catch(showFallback);});
-    }else{
-      soundEnabled=false;stopRadio();video.muted=true;
-      btn.querySelector('span').textContent=soundLabel;
-      if(videoEnded)close();
-    }
+  // No sound buttons. Unlocking the application with a PIN primes WebAudio.
+  // The video itself is deliberately silent so Safari permits reliable inline playback.
+  video.addEventListener('playing',()=>{
+    if(done)return;started=true;playing=true;ov.classList.add('ski-playing');
+    clearTimeout(loadTimeout);armAudio();startSoundtrack();sync();
   });
   video.addEventListener('timeupdate',sync);
   video.addEventListener('seeked',sync);
+  video.addEventListener('waiting',()=>{playing=false;});
   video.addEventListener('ended',()=>{
     videoEnded=true;ov.classList.add('ski-show-data');
-    // Preserve the last HUD frame until the slightly longer night greeting finishes.
-    if(!radioPlaying)close();
+    if(!radioSource)close();
   });
-  video.addEventListener('error',()=>{
-    if(!triedLow && /1080/.test(media.src)){
-      triedLow=true;video.pause();video.src=media.src.replace('1080','720');video.load();
-      video.muted=true;video.play().catch(showFallback);
-    }else showFallback();
-  });
-  const loadTimeout=setTimeout(()=>{if(video.readyState===0)showFallback();},15000);
-  let durationTimeout=setTimeout(()=>{if(!done && !fallback)close();},13000);
-  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){showFallback();}
-  else {
-    video.src=media.src;video.load();
-    video.muted=!wantAudio;
-    soundEnabled=wantAudio;
-    if(wantAudio)armRadio();
-    video.play().then(()=>{
-      if(!video.muted){btn.querySelector('span').textContent='Выключить звук';btn.classList.remove('ski-highlight-sound');}
-    }).catch(()=>{
-      // Safari/iOS rejects an unmuted autoplay even after PIN verification.
-      // Continue silently and offer a real user-gesture retry in the splash.
-      soundEnabled=false;video.muted=true;btn.hidden=false;btn.classList.add('ski-highlight-sound');
-      btn.querySelector('span').textContent='Нажмите, чтобы включить звук';
-      video.play().catch(showFallback);
-    });
-  }
+  video.addEventListener('error',attemptFallback);
+  durationTimeout=setTimeout(()=>{if(!done)close();},14500);
+  if(window.matchMedia('(prefers-reduced-motion: reduce)').matches){showFallback();return;}
+  video.muted=true;video.defaultMuted=true;
+  // Start with the *real* first frame, no artificial green placeholder.
+  video.src=media.src;
+  video.load();
+  armAudio();
+  loadTimeout=setTimeout(()=>{if(!started)attemptFallback();},9000);
+  video.play().catch(attemptFallback);
 }
 
 /* ================= обучение ================= */
